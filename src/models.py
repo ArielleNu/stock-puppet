@@ -20,4 +20,36 @@ class Review(db.Model):
     
     def __repr__(self):
         return f'Review {self.id}: {self.imdb_rating}'
+    
+#Define company model
+class Company(db.Model):
+    __tablename__ = 'companies'
+    ticker = db.Column(db.String(10), primary_key=True)
+    name = db.Column(db.String(256), nullable=False)
+    sector = db.Column(db.String(128), nullable=True)
+    industry = db.Column(db.String(256), nullable=True)
+    market_cap = db.Column(db.Float, nullable=True)
+    dividend_yield = db.Column(db.Float, nullable=True)
+    description = db.Column(db.Text, nullable=True)
+    city = db.Column(db.String(128), nullable=True)
+    state = db.Column(db.String(64), nullable=True)
+    country = db.Column(db.String(64), nullable=True)
+    website = db.Column(db.String(256), nullable=True)
 
+    def __repr__(self):
+        return f'<Company {self.ticker}: {self.name}>'
+
+    def to_dict(self):
+        return {
+            'ticker': self.ticker,
+            'name': self.name,
+            'sector': self.sector,
+            'industry': self.industry,
+            'market_cap': self.market_cap,
+            'dividend_yield': self.dividend_yield,
+            'description': self.description,
+            'city': self.city,
+            'state': self.state,
+            'country': self.country,
+            'website': self.website
+        }
