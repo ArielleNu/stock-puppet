@@ -62,8 +62,8 @@ def recommend_stocks(portfolio, top_n=5):
     
     # normalize tickers
     portfolio = [ticker.upper().strip() for ticker in portfolio if ticker.strip()]
-
     # TODO: Finish
+    raise NotImplementedError
 
 def register_routes(app):
     @app.route('/', defaults={'path': ''})
