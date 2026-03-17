@@ -1,5 +1,20 @@
-export interface Episode {
-  title: string;
-  descr: string;
-  imdb_rating: number;
+// GET /api/search?query=...&mode=text|portfolio -> Stock[]
+// similarity: 0-1, sentiment: roughly -1 to 1
+
+export interface Stock {
+  ticker: string;
+  name: string;
+  similarity: number;
+  sector?: string;
+  industry?: string;
+  description?: string;
+  market_cap?: number | string;
+  dividend_yield?: number;
+  website?: string;
+  city?: string;
+  state?: string;
+  country?: string;
+  sentiment?: number;
 }
+
+export type QueryMode = 'text' | 'portfolio';
