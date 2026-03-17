@@ -6,7 +6,7 @@ To enable AI chat, set USE_LLM = True below. See llm_routes.py for AI code.
 import json
 import os
 from flask import send_from_directory, request, jsonify
-from models import db, Episode, Review
+from models import db, Episode, Review, Company
 
 # ── AI toggle ────────────────────────────────────────────────────────────────
 USE_LLM = False
@@ -31,6 +31,39 @@ def json_search(query):
         })
     return matches
 
+def recommend_stocks(portfolio, top_n=5):
+    """
+    Generate stock recommendations based on user's portfolio.
+    
+    Parameters
+    ----------
+    portfolio : list[str]
+        A list of stock tickers provided by the user.
+        Example: ["NVDA", "AMD"]
+        
+    top_n : int
+        Number of recommendations to return.
+        
+    Returns
+    -------
+    list[dict]
+        A list of recommended companies ranked by similarity score.
+        Each result contains company metadata used by the frontend.
+
+    Notes
+    -----
+    - Companies already in the portfolio are excluded from recommendations.
+    - Higher score = more similar to portfolio.
+    """
+
+    # handle empty portfolio input
+    if not portfolio:
+        return []
+    
+    # normalize tickers
+    portfolio = [ticker.upper().strip() for ticker in portfolio if ticker.strip()]
+
+    # TODO: Finish
 
 def register_routes(app):
     @app.route('/', defaults={'path': ''})
