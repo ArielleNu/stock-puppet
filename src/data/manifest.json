@@ -1,0 +1,10 @@
+{
+  "as_of_utc": "2026-03-19T14:35:34+00:00",
+  "holdings_csv": "src/data/holdings.csv",
+  "tickers_file": "src/data/tickers.txt",
+  "tickers_in_holdings": 3464,
+  "profiles_returned": 0,
+  "tickers_matched_to_profiles": 0,
+  "fmp_endpoint": "profile (batched, batch_size=25)",
+  "fmp_call_count": 139
+}

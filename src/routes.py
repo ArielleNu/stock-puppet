@@ -3,10 +3,9 @@ Routes: React app serving and episode search API.
 
 To enable AI chat, set USE_LLM = True below. See llm_routes.py for AI code.
 """
-import json
 import os
 from flask import send_from_directory, request, jsonify
-from models import db, Episode, Review
+from models import db, Episode, Review, Company
 
 # ── AI toggle ────────────────────────────────────────────────────────────────
 USE_LLM = False
@@ -49,6 +48,45 @@ def register_routes(app):
     def episodes_search():
         text = request.args.get("title", "")
         return jsonify(json_search(text))
+
+    @app.route("/api/companies")
+    def companies_list():
+        """
+        Simple company browse/search endpoint.
+        Query params:
+          - q: substring match on ticker or name
+          - sector: exact match filter
+          - limit: max results (default 50, max 200)
+        """
+        q = (request.args.get("q") or "").strip()
+        sector = (request.args.get("sector") or "").strip()
+        try:
+            limit = int(request.args.get("limit") or "50")
+        except Exception:
+            limit = 50
+        limit = max(1, min(200, limit))
+
+        query = Company.query
+        if sector:
+            query = query.filter(Company.sector == sector)
+        if q:
+            query = query.filter(
+                db.or_(
+                    Company.ticker.ilike(f"%{q}%"),
+                    Company.name.ilike(f"%{q}%"),
+                )
+            )
+
+        results = query.limit(limit).all()
+        return jsonify([c.to_dict() for c in results])
+
+    @app.route("/api/companies/<ticker>")
+    def company_detail(ticker: str):
+        t = (ticker or "").strip().upper()
+        company = Company.query.get(t)
+        if not company:
+            return jsonify({"error": "Company not found"}), 404
+        return jsonify(company.to_dict())
 
     if USE_LLM:
         from llm_routes import register_chat_route

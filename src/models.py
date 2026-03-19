@@ -28,13 +28,13 @@ class Company(db.Model):
     name = db.Column(db.String(256), nullable=False)
     sector = db.Column(db.String(128), nullable=True)
     industry = db.Column(db.String(256), nullable=True)
-    market_cap = db.Column(db.Float, nullable=True)
-    dividend_yield = db.Column(db.Float, nullable=True)
+    market_cap_fmp = db.Column(db.Float, nullable=True)
     description = db.Column(db.Text, nullable=True)
     city = db.Column(db.String(128), nullable=True)
     state = db.Column(db.String(64), nullable=True)
     country = db.Column(db.String(64), nullable=True)
     website = db.Column(db.String(256), nullable=True)
+    source_json = db.Column(db.Text, nullable=True)
 
     def __repr__(self):
         return f'<Company {self.ticker}: {self.name}>'
@@ -45,11 +45,11 @@ class Company(db.Model):
             'name': self.name,
             'sector': self.sector,
             'industry': self.industry,
-            'market_cap': self.market_cap,
-            'dividend_yield': self.dividend_yield,
+            'market_cap_fmp': self.market_cap_fmp,
             'description': self.description,
             'city': self.city,
             'state': self.state,
             'country': self.country,
-            'website': self.website
+            'website': self.website,
+            'source': self.source_json
         }
