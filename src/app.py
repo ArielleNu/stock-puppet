@@ -5,7 +5,7 @@ from flask import Flask
 
 load_dotenv()
 from flask_cors import CORS
-from models import db, Episode, Review
+from models import db, Episode, Review, Company
 from routes import register_routes
 
 # src/ directory and project root (one level up)
@@ -28,10 +28,10 @@ db.init_app(app)
 # Register routes
 register_routes(app)
 
-# Function to initialize database, change this to your own database initialization logic
+# Initialize database from local seed files.
 def init_db():
     with app.app_context():
-        # Create all tables
+        # Create tables if they don't exist
         db.create_all()
         
         # Initialize database with data from init.json if empty
@@ -56,6 +56,38 @@ def init_db():
             
             db.session.commit()
             print("Database initialized with episodes and reviews data")
+
+        # Initialize companies table from src/data/company-data.json if present.
+        company_data_json = os.path.join(current_directory, "data", "company-data.json")
+        if Company.query.count() == 0 and os.path.exists(company_data_json):
+            added = 0
+            with open(company_data_json, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    for row in data:
+                        if not isinstance(row, dict):
+                            continue
+                        symbol = (row.get("symbol") or "").strip().upper()
+                        if not symbol:
+                            continue
+                        name = row.get("companyName") or row.get("name") or symbol
+                        company = Company(
+                            ticker=symbol,
+                            name=name,
+                            sector=row.get("sector"),
+                            industry=row.get("industry"),
+                            market_cap_fmp=row.get("mktCap"),
+                            description=row.get("description"),
+                            city=row.get("city"),
+                            state=row.get("state"),
+                            country=row.get("country"),
+                            website=row.get("website"),
+                            source_json=json.dumps({"source_file": "company-data.json"}),
+                        )
+                        db.session.add(company)
+                        added += 1
+            db.session.commit()
+            print(f"Database initialized with {added} companies from company-data.json")
 
 init_db()
 
