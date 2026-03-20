@@ -118,7 +118,7 @@ function App(): JSX.Element {
         <h1 className="hero-title">
           Stock<span className="hero-highlight">Puppet</span>
         </h1>
-        <p className="hero-sub">Discover stocks that match your investment strategy</p>
+        <p className="hero-sub">Pull the strings of smarter investing.</p>
 
         <div className="mode-tabs">
           <button className={`tab ${queryMode === 'text' ? 'active' : ''}`} onClick={() => setQueryMode('text')}>
