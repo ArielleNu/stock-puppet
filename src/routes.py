@@ -4,6 +4,7 @@ Routes: React app serving and episode search API.
 To enable AI chat, set USE_LLM = True below. See llm_routes.py for AI code.
 """
 import os
+import json
 from flask import send_from_directory, request, jsonify
 from models import db, Episode, Review, Company
 
@@ -92,16 +93,30 @@ def recommend_from_text_query(query, top_n=10):
     if not query or not query.strip():
         return []
     
-    query_words = [w for w in query.lower().split if w not in STOPWORDS]
+    query_words = [w for w in query.lower().split() if w not in STOPWORDS]
 
-    companies = Company.query.all()
+    # database:
+    # companies = Company.query.all()
+
+    # json:
+    with open("src/data/company-data.json", "r") as f:
+        companies = json.load(f)
+
     scored_results = []
 
     for company in companies:
-        description = (company.description or "").lower()
-        sector = (company.sector or "").lower()
-        industry = (company.industry or "").lower()
-        name = (company.name or "").lower()
+        # database:
+        # description = (company.description or "").lower()
+        # sector = (company.sector or "").lower()
+        # industry = (company.industry or "").lower()
+        # name = (company.name or "").lower()
+
+        # json:
+        description = company.get("description", "").lower()
+        sector = company.get("sector", "").lower()
+        industry = company.get("industry", "").lower()
+        name = company.get("companyName", "").lower()
+
 
         score = 0
 
@@ -116,15 +131,29 @@ def recommend_from_text_query(query, top_n=10):
                 score += 1
 
         if score > 0:
+            # database:
+            # scored_results.append({
+            #     "ticker": company.ticker,
+            #     "name": company.name,
+            #     "sector": company.sector,
+            #     "industry": company.industry,
+            #     "market_cap": company.market_cap,
+            #     "dividend_yield": company.dividend_yield,
+            #     "description": company.description,
+            #     "website": company.website,
+            #     "score": score
+            # })
+
+            # json:
             scored_results.append({
-                "ticker": company.ticker,
-                "name": company.name,
-                "sector": company.sector,
-                "industry": company.industry,
-                "market_cap": company.market_cap,
-                "dividend_yield": company.dividend_yield,
-                "description": company.description,
-                "website": company.website,
+                "ticker": company.get("symbol"),
+                "name": company.get("companyName"),
+                "sector": company.get("sector"),
+                "industry": company.get("industry"),
+                "market_cap": company.get("marketCap"),
+                "dividend_yield": company.get("lastDividend"),
+                "description": company.get("description"),
+                "website": company.get("website"),
                 "score": score
             })
 
