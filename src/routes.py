@@ -4,9 +4,9 @@ Routes: React app serving and episode search API.
 To enable AI chat, set USE_LLM = True below. See llm_routes.py for AI code.
 """
 import os
-import json
 from flask import send_from_directory, request, jsonify
 from models import db, Episode, Review, Company
+from tfidf_index import get_company_tfidf_index
 
 # ── AI toggle ────────────────────────────────────────────────────────────────
 USE_LLM = False
@@ -77,93 +77,17 @@ def recommend_stocks(portfolio, top_n=5):
 
 def recommend_from_text_query(query, top_n=10):
     """
-    Returns companies whose descriptions best match the query.
+    Returns companies ranked by TF–IDF cosine similarity to the query.
 
-    Parameters
-    ----------
-    query : str
-        A text query provided by the user.
-        Example: "AI semiconductor companies"
-        
-    top_n : int
-        Number of recommendations to return.
-
-    Returns
-    -------
-    List[Dict[str, Any]]
-        A list of dictionaries representing the top recommended 
-        companies ranked by relevance to the user's query.
+    Uses an inverted index over `company-data.json` (rebuilt when that file
+    changes). Document text combines symbol, name, sector, industry, and
+    description with extra weight on the first four (repeated tokens).
     """
     if not query or not query.strip():
         return []
-    
-    query_words = [w for w in query.lower().split() if w not in STOPWORDS]
 
-    # database:
-    # companies = Company.query.all()
-
-    # json:
-    with open(COMPANY_DATA_PATH, "r", encoding="utf-8") as f:
-        companies = json.load(f)
-
-    scored_results = []
-
-    for company in companies:
-        # database:
-        # description = (company.description or "").lower()
-        # sector = (company.sector or "").lower()
-        # industry = (company.industry or "").lower()
-        # name = (company.name or "").lower()
-
-        # json:
-        description = company.get("description", "").lower()
-        sector = company.get("sector", "").lower()
-        industry = company.get("industry", "").lower()
-        name = company.get("companyName", "").lower()
-
-
-        score = 0
-
-        for word in query_words:
-            if word in description:
-                score += 1
-            if word in sector:
-                score += 2
-            if word in industry:
-                score += 2
-            if word in name:
-                score += 1
-
-        if score > 0:
-            # database:
-            # scored_results.append({
-            #     "ticker": company.ticker,
-            #     "name": company.name,
-            #     "sector": company.sector,
-            #     "industry": company.industry,
-            #     "market_cap": company.market_cap,
-            #     "dividend_yield": company.dividend_yield,
-            #     "description": company.description,
-            #     "website": company.website,
-            #     "score": score
-            # })
-
-            # json:
-            scored_results.append({
-                "ticker": company.get("symbol"),
-                "name": company.get("companyName"),
-                "sector": company.get("sector"),
-                "industry": company.get("industry"),
-                "market_cap": company.get("marketCap"),
-                "dividend_yield": company.get("lastDividend"),
-                "description": company.get("description"),
-                "website": company.get("website"),
-                "image": company.get("image"),
-                "score": score
-            })
-
-    scored_results.sort(key = lambda x: x["score"], reverse=True)
-    return scored_results[:top_n]
+    index = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
+    return index.search(query.strip(), STOPWORDS, top_n)
 
 def register_routes(app):
     @app.route('/', defaults={'path': ''})

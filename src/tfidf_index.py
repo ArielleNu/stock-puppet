@@ -1,0 +1,181 @@
+"""
+TF-IDF retrieval with an inverted index and cosine similarity.
+
+"""
+from __future__ import annotations
+
+import json
+import math
+import os
+import re
+from collections import Counter, defaultdict
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+_TOKEN_RE = re.compile(r"[a-zA-Z0-9]+")
+
+
+def tokenize(text: str, stopwords: Set[str]) -> List[str]:
+    """Lowercase alphanumeric tokens; drop stopwords and single-character runs."""
+    out: List[str] = []
+    for m in _TOKEN_RE.finditer(text or ""):
+        t = m.group(0).lower()
+        if len(t) < 2 or t in stopwords:
+            continue
+        out.append(t)
+    return out
+
+
+def _company_to_doc_text(company: Dict[str, Any]) -> str:
+    sym = (company.get("symbol") or "").strip()
+    name = (company.get("companyName") or "").strip()
+    sector = (company.get("sector") or "").strip()
+    industry = (company.get("industry") or "").strip()
+    desc = (company.get("description") or "").strip()
+    parts = [
+        f"{sym} {sym}" if sym else "",
+        f"{name} {name}" if name else "",
+        f"{sector} {sector}" if sector else "",
+        f"{industry} {industry}" if industry else "",
+        desc,
+    ]
+    return " ".join(p for p in parts if p)
+
+
+def _tf_weight(count: int) -> float:
+    """Logarithmic term frequency (1 + log(count)) for count >= 1."""
+    if count <= 0:
+        return 0.0
+    return 1.0 + math.log(count)
+
+
+def _company_to_api_dict(company: Dict[str, Any], score: float) -> Dict[str, Any]:
+    return {
+        "ticker": company.get("symbol"),
+        "name": company.get("companyName"),
+        "sector": company.get("sector"),
+        "industry": company.get("industry"),
+        "market_cap": company.get("marketCap"),
+        "dividend_yield": company.get("lastDividend"),
+        "description": company.get("description"),
+        "website": company.get("website"),
+        "image": company.get("image"),
+        "score": score,
+    }
+
+
+class CompanyTfidfIndex:
+    """
+    Inverted index: term -> list of (doc_id, tfidf_weight).
+    doc_norms[i] = L2 norm of the TF-IDF vector for document i.
+    """
+
+    def __init__(
+        self,
+        companies: List[Dict[str, Any]],
+        inverted: Dict[str, List[Tuple[int, float]]],
+        idf: Dict[str, float],
+        doc_norms: List[float],
+    ) -> None:
+        self.companies = companies
+        self._inverted = inverted
+        self._idf = idf
+        self._doc_norms = doc_norms
+        self._n_docs = len(companies)
+
+    @classmethod
+    def build(cls, companies: List[Dict[str, Any]], stopwords: Set[str]) -> CompanyTfidfIndex:
+        n_docs = len(companies)
+        if n_docs == 0:
+            return cls([], {}, {}, [])
+
+        doc_term_tf: List[Counter] = []
+        df: Counter = Counter()
+
+        for c in companies:
+            tokens = tokenize(_company_to_doc_text(c), stopwords)
+            tf = Counter(tokens)
+            doc_term_tf.append(tf)
+            df.update(tf.keys())
+
+        idf: Dict[str, float] = {}
+        for term, dfi in df.items():
+            # Smoothed IDF (idf > 0 when dfi <= n_docs)
+            idf[term] = math.log((n_docs + 1) / (dfi + 1)) + 1.0
+
+        inverted: Dict[str, List[Tuple[int, float]]] = defaultdict(list)
+        doc_norm_sq = [0.0] * n_docs
+
+        for doc_id, tf in enumerate(doc_term_tf):
+            for term, cnt in tf.items():
+                w = _tf_weight(cnt) * idf[term]
+                inverted[term].append((doc_id, w))
+                doc_norm_sq[doc_id] += w * w
+
+        doc_norms = [math.sqrt(s) for s in doc_norm_sq]
+        return cls(companies, dict(inverted), idf, doc_norms)
+
+    def search(self, query: str, stopwords: Set[str], top_n: int) -> List[Dict[str, Any]]:
+        if top_n <= 0 or not self.companies:
+            return []
+
+        q_tf = Counter(tokenize(query, stopwords))
+        if not q_tf:
+            return []
+
+        q_weights: Dict[str, float] = {}
+        for term, cnt in q_tf.items():
+            if term not in self._idf:
+                continue
+            q_weights[term] = _tf_weight(cnt) * self._idf[term]
+
+        if not q_weights:
+            return []
+
+        norm_q = math.sqrt(sum(w * w for w in q_weights.values()))
+        if norm_q == 0:
+            return []
+
+        dot_acc: Dict[int, float] = defaultdict(float)
+        for term, qw in q_weights.items():
+            postings = self._inverted.get(term)
+            if not postings:
+                continue
+            for doc_id, w_td in postings:
+                dot_acc[doc_id] += qw * w_td
+
+        scored: List[Tuple[int, float]] = []
+        for doc_id, dot in dot_acc.items():
+            dn = self._doc_norms[doc_id]
+            if dn == 0:
+                continue
+            cos = dot / (norm_q * dn)
+            if cos > 0:
+                scored.append((doc_id, cos))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        out: List[Dict[str, Any]] = []
+        for doc_id, cos in scored[:top_n]:
+            out.append(_company_to_api_dict(self.companies[doc_id], cos))
+        return out
+
+
+_index_cache: Optional[Tuple[Tuple[float, Tuple[str, ...]], CompanyTfidfIndex]] = None
+
+
+def get_company_tfidf_index(data_path: str, stopwords: Set[str]) -> CompanyTfidfIndex:
+    """Load JSON companies and rebuild the index when the file or stopwords change."""
+    global _index_cache
+    mtime = os.path.getmtime(data_path)
+    sw_key = tuple(sorted(stopwords))
+    cache_key = (mtime, sw_key)
+    if _index_cache is not None and _index_cache[0] == cache_key:
+        return _index_cache[1]
+
+    with open(data_path, "r", encoding="utf-8") as f:
+        companies = json.load(f)
+    if not isinstance(companies, list):
+        companies = []
+
+    index = CompanyTfidfIndex.build(companies, stopwords)
+    _index_cache = (cache_key, index)
+    return index
