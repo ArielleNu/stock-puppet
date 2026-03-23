@@ -93,10 +93,10 @@ function App(): JSX.Element {
         website?: string;
       }>;
 
-      const maxScore = Math.max(
-        1,
-        ...data.map((d) => (typeof d.score === "number" ? d.score : 0)),
-      );
+      const maxScore =
+        Math.max(
+          ...data.map((d) => (typeof d.score === "number" ? d.score : 0)),
+        ) || 1;
 
       const mapped: Stock[] = data.map((d) => ({
         ticker: d.ticker,

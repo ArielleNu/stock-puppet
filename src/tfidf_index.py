@@ -62,7 +62,21 @@ def _company_to_api_dict(company: Dict[str, Any], score: float) -> Dict[str, Any
         "score": score,
     }
 
-
+def _edit_distance(s1: str, s2: str) -> int:
+    # computing the standard edit distance
+    if len(s1) < len(s2):
+        return _edit_distance(s2, s1)
+    prev = list(range(len(s2) + 1))
+    for i, c1 in enumerate(s1):
+        curr = [i + 1]
+        for j, c2 in enumerate(s2):
+            curr.append(min(
+                prev[j + 1] + 1,
+                curr[j] + 1,
+                prev[j] + (0 if c1 == c2 else 1),
+            ))
+        prev = curr
+    return prev[-1]
 class CompanyTfidfIndex:
     """
     Inverted index: term -> list of (doc_id, tfidf_weight).
@@ -118,9 +132,31 @@ class CompanyTfidfIndex:
         if top_n <= 0 or not self.companies:
             return []
 
-        q_tf = Counter(tokenize(query, stopwords))
-        if not q_tf:
+        q_tokens = tokenize(query, stopwords)
+        if not q_tokens:
             return []
+
+        # if a query token isn't in the vocabulary, find the closest term by edit distance
+        corrected = []
+        for t in q_tokens:
+            if t in self._idf:
+                corrected.append(t)
+            else:
+                best_term, best_dist = None, float("inf")
+                for vocab_term in self._idf:
+                    if abs(len(vocab_term) - len(t)) > 2:
+                        continue
+                    d = _edit_distance(t, vocab_term)
+                    if d < best_dist:
+                        best_dist = d
+                        best_term = vocab_term
+                if best_term and best_dist <= 2:
+                    corrected.append(best_term)
+        
+        if not corrected:
+            return []
+
+        q_tf = Counter(corrected)
 
         q_weights: Dict[str, float] = {}
         for term, cnt in q_tf.items():
