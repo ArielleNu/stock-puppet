@@ -732,8 +732,17 @@ function App(): JSX.Element {
                           ))}
                         </svg>
                         <div className="peer-network-scale">
-                          <span>More similar</span>
-                          <span>Less similar</span>
+                          <span className="peer-key-title">Position key</span>
+                          <div className="peer-key-items">
+                            <span className="peer-key-item">
+                              <span className="peer-key-swatch peer-key-swatch-inner" />
+                              Center ring: more similar
+                            </span>
+                            <span className="peer-key-item">
+                              <span className="peer-key-swatch peer-key-swatch-outer" />
+                              Outer rings: less similar
+                            </span>
+                          </div>
                         </div>
                         {sectorLegend.length > 0 && (
                           <div className="peer-legend">

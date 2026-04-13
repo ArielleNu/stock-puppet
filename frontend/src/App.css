@@ -571,10 +571,51 @@
 .peer-network-scale {
   margin-top: 8px;
   display: flex;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid #2a2e39;
+  border-radius: 8px;
+  background: rgba(20, 24, 32, 0.65);
   font-family: "Inter", sans-serif;
   font-size: 0.68rem;
   color: #787b86;
+}
+
+.peer-key-title {
+  font-size: 0.65rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #a8acb8;
+}
+
+.peer-key-items {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.peer-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.peer-key-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.peer-key-swatch-inner {
+  border: 2px solid #2962ff;
+  box-shadow: 0 0 0 1px rgba(41, 98, 255, 0.2);
+}
+
+.peer-key-swatch-outer {
+  border: 2px dashed #4c525e;
 }
 
 .peer-legend {
