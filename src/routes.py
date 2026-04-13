@@ -309,14 +309,18 @@ def register_routes(app):
         query = data.get("query", "")
         portfolio = data.get("portfolio", [])
         method = data.get("method", "hybrid")
+        preferences = data.get("preferences", {})
 
         if query:
             results = recommend_from_text_query(query, method=method)
+            if preferences:
+                results = apply_preferences(results, preferences)
             return jsonify(results)
         
         if portfolio:
-            print("AHAHAHAHHASHSHSHDISBFKJFBSKB")
             results = recommend_stocks(portfolio)
+            if preferences:
+                results = apply_preferences(results, preferences)
             return jsonify(results)
 
 
