@@ -65,6 +65,7 @@ def _company_to_api_dict(
         "industry": company.get("industry"),
         "market_cap": company.get("marketCap"),
         "dividend_yield": company.get("lastDividend"),
+        "beta": company.get("beta"),
         "description": company.get("description"),
         "website": company.get("website"),
         "image": company.get("image"),
