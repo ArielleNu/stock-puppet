@@ -89,6 +89,11 @@ def recommend_from_text_query(query, top_n=10):
     index = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
     return index.search(query.strip(), STOPWORDS, top_n)
 
+
+def recommend_from_ticker_global_peers(ticker, top_n=6):
+    index = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
+    return index.similar_companies(ticker, top_n)
+
 def register_routes(app):
     @app.route('/', defaults={'path': ''})
     @app.route('/<path:path>')
@@ -138,6 +143,16 @@ def register_routes(app):
         ]
 
         return jsonify(results)
+
+    @app.route("/api/peers/<ticker>")
+    def global_peers(ticker: str):
+        try:
+            limit = int(request.args.get("limit") or "6")
+        except Exception:
+            limit = 6
+        limit = max(1, min(20, limit))
+        peers = recommend_from_ticker_global_peers(ticker, top_n=limit)
+        return jsonify(peers)
 
     # tester code for making sure the routes are hit correctly
     # @app.route("/api/recommend", methods=["POST"])

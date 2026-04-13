@@ -35,6 +35,55 @@ function formatMarketCap(cap: number | string | undefined): string {
   return `$${cap.toLocaleString()}`;
 }
 
+type PeerNode = {
+  ticker: string;
+  similarity: number;
+  x: number;
+  y: number;
+  isCenter: boolean;
+  sector?: string;
+  marketCap?: number | string;
+};
+type PeerScope = "result" | "global";
+
+function getSectorColor(sector?: string): string {
+  if (!sector) return "#787b86";
+  const hue =
+    [...sector].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % 360;
+  return `hsl(${hue}, 62%, 56%)`;
+}
+
+function getPeerNodes(center: Stock, peers: Stock[]): PeerNode[] {
+  if (!center) return [];
+
+  const centerNode: PeerNode = {
+    ticker: center.ticker,
+    similarity: 1,
+    x: 50,
+    y: 50,
+    isCenter: true,
+    sector: center.sector,
+    marketCap: center.market_cap,
+  };
+
+  const peerNodes: PeerNode[] = peers.map((stock, i) => {
+    const angle = (i / Math.max(peers.length, 1)) * Math.PI * 2 - Math.PI / 2;
+    // Higher similarity sits closer to the center.
+    const radius = 12 + (1 - stock.similarity) * 30;
+    return {
+      ticker: stock.ticker,
+      similarity: stock.similarity,
+      x: 50 + Math.cos(angle) * radius,
+      y: 50 + Math.sin(angle) * radius,
+      isCenter: false,
+      sector: stock.sector,
+      marketCap: stock.market_cap,
+    };
+  });
+
+  return [centerNode, ...peerNodes];
+}
+
 function App(): JSX.Element {
   const [useLlm, setUseLlm] = useState<boolean | null>(null);
   const [queryMode, setQueryMode] = useState<QueryMode>("text");
@@ -44,6 +93,15 @@ function App(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState<boolean>(false);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const [peerScopeByTicker, setPeerScopeByTicker] = useState<
+    Record<string, PeerScope>
+  >({});
+  const [globalPeersByTicker, setGlobalPeersByTicker] = useState<
+    Record<string, Stock[]>
+  >({});
+  const [globalPeersLoading, setGlobalPeersLoading] = useState<
+    Record<string, boolean>
+  >({});
 
   useEffect(() => {
     fetch("/api/config")
@@ -130,6 +188,54 @@ function App(): JSX.Element {
     if (score >= 0.3) return { label: "Bullish", cls: "bullish" };
     if (score <= -0.3) return { label: "Bearish", cls: "bearish" };
     return { label: "Neutral", cls: "neutral" };
+  };
+
+  const handlePeerScopeChange = async (
+    ticker: string,
+    scope: PeerScope,
+  ): Promise<void> => {
+    setPeerScopeByTicker((prev) => ({ ...prev, [ticker]: scope }));
+    if (scope !== "global" || globalPeersByTicker[ticker]) {
+      return;
+    }
+    setGlobalPeersLoading((prev) => ({ ...prev, [ticker]: true }));
+    try {
+      const res = await fetch(`/api/peers/${ticker}?limit=6`);
+      if (!res.ok) throw new Error(`Failed to load peers (${res.status})`);
+      const data = (await res.json()) as Array<{
+        ticker: string;
+        name: string;
+        score?: number;
+        sector?: string;
+        industry?: string;
+        market_cap?: number | string;
+        dividend_yield?: number;
+        description?: string;
+        image?: string;
+        website?: string;
+      }>;
+      const maxScore =
+        Math.max(
+          ...data.map((d) => (typeof d.score === "number" ? d.score : 0)),
+        ) || 1;
+      const mapped: Stock[] = data.map((d) => ({
+        ticker: d.ticker,
+        name: d.name,
+        similarity: (typeof d.score === "number" ? d.score : 0) / maxScore,
+        sector: d.sector,
+        industry: d.industry,
+        description: d.description,
+        market_cap: d.market_cap,
+        dividend_yield: d.dividend_yield,
+        website: d.website,
+        image: d.image,
+      }));
+      setGlobalPeersByTicker((prev) => ({ ...prev, [ticker]: mapped }));
+    } catch {
+      setGlobalPeersByTicker((prev) => ({ ...prev, [ticker]: [] }));
+    } finally {
+      setGlobalPeersLoading((prev) => ({ ...prev, [ticker]: false }));
+    }
   };
 
   if (useLlm === null) return <></>;
@@ -392,6 +498,26 @@ function App(): JSX.Element {
                   ? getSentimentInfo(stock.sentiment)
                   : null;
               const isExpanded = expandedIdx === i;
+              const peerScope = peerScopeByTicker[stock.ticker] ?? "result";
+              const resultPeers = stocks
+                .filter((s) => s.ticker !== stock.ticker)
+                .sort((a, b) => b.similarity - a.similarity)
+                .slice(0, 6);
+              const selectedPeers =
+                peerScope === "global"
+                  ? globalPeersByTicker[stock.ticker] ?? []
+                  : resultPeers;
+              const peerNodes = getPeerNodes(stock, selectedPeers);
+              const centerNode = peerNodes[0];
+              const peerOnlyNodes = peerNodes.slice(1);
+              const peerCount = Math.max(peerNodes.length - 1, 0);
+              const sectorLegend = Array.from(
+                new Map(
+                  peerOnlyNodes
+                    .filter((node) => node.sector)
+                    .map((node) => [node.sector as string, node]),
+                ).entries(),
+              ).slice(0, 4);
               return (
                 <div
                   key={i}
@@ -510,6 +636,152 @@ function App(): JSX.Element {
                           <p>{stock.description}</p>
                         </div>
                       )}
+                      <div className="peer-network-card">
+                        <div className="peer-network-header">
+                          <span className="expanded-label">Peer Network Graph</span>
+                          <div
+                            className="peer-scope-tabs"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              className={`peer-scope-tab ${peerScope === "result" ? "active" : ""}`}
+                              onClick={() =>
+                                handlePeerScopeChange(stock.ticker, "result")
+                              }
+                            >
+                              Result Set
+                            </button>
+                            <button
+                              type="button"
+                              className={`peer-scope-tab ${peerScope === "global" ? "active" : ""}`}
+                              onClick={() =>
+                                handlePeerScopeChange(stock.ticker, "global")
+                              }
+                            >
+                              Global
+                            </button>
+                          </div>
+                          <span className="peer-network-meta">
+                            {globalPeersLoading[stock.ticker]
+                              ? "Loading global peers..."
+                              : peerCount > 0
+                                ? peerScope === "global"
+                                  ? `${peerCount} global TF-IDF peers`
+                                  : `${peerCount} nearby peers from this result set`
+                                : "No peers available"}
+                          </span>
+                        </div>
+                        <svg
+                          className="peer-network-svg"
+                          viewBox="0 0 100 100"
+                          role="img"
+                          aria-label={`Peer network for ${stock.ticker}`}
+                        >
+                          <circle cx="50" cy="50" r="14" className="peer-ring" />
+                          <circle cx="50" cy="50" r="28" className="peer-ring" />
+                          <circle cx="50" cy="50" r="42" className="peer-ring" />
+
+                          {centerNode &&
+                            peerNodes.slice(1).map((node) => (
+                              <g key={`edge-${stock.ticker}-${node.ticker}`}>
+                                <line
+                                  x1={centerNode.x}
+                                  y1={centerNode.y}
+                                  x2={node.x}
+                                  y2={node.y}
+                                  className="peer-edge"
+                                  style={{
+                                    opacity: Math.max(node.similarity, 0.2),
+                                    strokeWidth: 0.4 + node.similarity * 1.2,
+                                  }}
+                                />
+                              </g>
+                            ))}
+
+                          {peerNodes.map((node) => (
+                            <g
+                              key={`node-${stock.ticker}-${node.ticker}`}
+                              className="peer-node"
+                            >
+                              <circle
+                                cx={node.x}
+                                cy={node.y}
+                                r={node.isCenter ? 8 : 5.5}
+                                fill={
+                                  node.isCenter
+                                    ? getTickerColor(node.ticker)
+                                    : getSectorColor(node.sector)
+                                }
+                                stroke={node.isCenter ? "#ffffff" : "#4c525e"}
+                                strokeWidth={node.isCenter ? 1.2 : 0.6}
+                              />
+                              <text
+                                x={node.x}
+                                y={node.y + (node.isCenter ? 0.8 : 0.5)}
+                                textAnchor="middle"
+                                className="peer-node-label"
+                                style={{
+                                  fontSize: node.isCenter ? "3px" : "2.2px",
+                                  fontWeight: node.isCenter ? 700 : 600,
+                                }}
+                              >
+                                {node.ticker}
+                              </text>
+                            </g>
+                          ))}
+                        </svg>
+                        <div className="peer-network-scale">
+                          <span>More similar</span>
+                          <span>Less similar</span>
+                        </div>
+                        {sectorLegend.length > 0 && (
+                          <div className="peer-legend">
+                            {sectorLegend.map(([sector, node]) => (
+                              <span
+                                key={`legend-${stock.ticker}-${sector}`}
+                                className="peer-legend-item"
+                              >
+                                <span
+                                  className="peer-legend-dot"
+                                  style={{
+                                    backgroundColor: getSectorColor(node.sector),
+                                  }}
+                                />
+                                {sector}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {peerOnlyNodes.length > 0 && (
+                          <div className="peer-table">
+                            <div className="peer-table-head">
+                              <span>Peer</span>
+                              <span>Sector</span>
+                              <span>Market Cap</span>
+                              <span>Similarity</span>
+                            </div>
+                            {peerOnlyNodes
+                              .slice()
+                              .sort((a, b) => b.similarity - a.similarity)
+                              .map((node) => (
+                                <div
+                                  key={`peer-row-${stock.ticker}-${node.ticker}`}
+                                  className="peer-table-row"
+                                >
+                                  <span className="peer-table-ticker">
+                                    {node.ticker}
+                                  </span>
+                                  <span>{node.sector ?? "—"}</span>
+                                  <span>{formatMarketCap(node.marketCap)}</span>
+                                  <span className="peer-table-sim">
+                                    {(node.similarity * 100).toFixed(1)}%
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>

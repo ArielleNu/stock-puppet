@@ -89,18 +89,22 @@ class CompanyTfidfIndex:
         inverted: Dict[str, List[Tuple[int, float]]],
         idf: Dict[str, float],
         doc_norms: List[float],
+        doc_vectors: List[Dict[str, float]],
+        symbol_to_doc_id: Dict[str, int],
     ) -> None:
         self.companies = companies
         self._inverted = inverted
         self._idf = idf
         self._doc_norms = doc_norms
+        self._doc_vectors = doc_vectors
+        self._symbol_to_doc_id = symbol_to_doc_id
         self._n_docs = len(companies)
 
     @classmethod
     def build(cls, companies: List[Dict[str, Any]], stopwords: Set[str]) -> CompanyTfidfIndex:
         n_docs = len(companies)
         if n_docs == 0:
-            return cls([], {}, {}, [])
+            return cls([], {}, {}, [], [], {})
 
         doc_term_tf: List[Counter] = []
         df: Counter = Counter()
@@ -118,15 +122,29 @@ class CompanyTfidfIndex:
 
         inverted: Dict[str, List[Tuple[int, float]]] = defaultdict(list)
         doc_norm_sq = [0.0] * n_docs
+        doc_vectors: List[Dict[str, float]] = [{} for _ in range(n_docs)]
 
         for doc_id, tf in enumerate(doc_term_tf):
             for term, cnt in tf.items():
                 w = _tf_weight(cnt) * idf[term]
                 inverted[term].append((doc_id, w))
                 doc_norm_sq[doc_id] += w * w
+                doc_vectors[doc_id][term] = w
 
         doc_norms = [math.sqrt(s) for s in doc_norm_sq]
-        return cls(companies, dict(inverted), idf, doc_norms)
+        symbol_to_doc_id: Dict[str, int] = {}
+        for doc_id, company in enumerate(companies):
+            symbol = (company.get("symbol") or "").strip().upper()
+            if symbol:
+                symbol_to_doc_id[symbol] = doc_id
+        return cls(
+            companies,
+            dict(inverted),
+            idf,
+            doc_norms,
+            doc_vectors,
+            symbol_to_doc_id,
+        )
 
     def search(self, query: str, stopwords: Set[str], top_n: int) -> List[Dict[str, Any]]:
         if top_n <= 0 or not self.companies:
@@ -192,6 +210,41 @@ class CompanyTfidfIndex:
         out: List[Dict[str, Any]] = []
         for doc_id, cos in scored[:top_n]:
             out.append(_company_to_api_dict(self.companies[doc_id], cos))
+        return out
+
+    def similar_companies(self, ticker: str, top_n: int) -> List[Dict[str, Any]]:
+        if top_n <= 0 or not ticker:
+            return []
+        doc_id = self._symbol_to_doc_id.get(ticker.strip().upper())
+        if doc_id is None:
+            return []
+
+        center_norm = self._doc_norms[doc_id]
+        if center_norm == 0:
+            return []
+
+        dot_acc: Dict[int, float] = defaultdict(float)
+        center_vec = self._doc_vectors[doc_id]
+        for term, w_center in center_vec.items():
+            postings = self._inverted.get(term, [])
+            for other_doc_id, w_other in postings:
+                if other_doc_id == doc_id:
+                    continue
+                dot_acc[other_doc_id] += w_center * w_other
+
+        scored: List[Tuple[int, float]] = []
+        for other_doc_id, dot in dot_acc.items():
+            other_norm = self._doc_norms[other_doc_id]
+            if other_norm == 0:
+                continue
+            cos = dot / (center_norm * other_norm)
+            if cos > 0:
+                scored.append((other_doc_id, cos))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        out: List[Dict[str, Any]] = []
+        for other_doc_id, cos in scored[:top_n]:
+            out.append(_company_to_api_dict(self.companies[other_doc_id], cos))
         return out
 
 
