@@ -26,6 +26,12 @@ STOPWORDS = {
 SVD_WEIGHT = 0.6
 TFIDF_WEIGHT = 0.4
 
+CAP_THRESHOLDS = {
+    "large": 10e9,   # > $10B
+    "mid_low": 2e9,  # $2B - $10B
+    "small": 2e9,    # < $2B
+}
+
 def json_search(query):
     if not query or not query.strip():
         query = "Kardashian"
@@ -202,6 +208,70 @@ def recommend_from_text_query(query, top_n=10, method="hybrid"):
     ranked.sort(key=lambda x: x["score"], reverse=True)
     return ranked[:top_n]
 
+def apply_preferences(results, preferences):
+    """
+    Reweight and filter results based on user preferences.
+
+    preferences is a dict with optional keys:
+      - risk_tolerance: "low" | "medium" | "high"
+      - focus: "dividend" | "growth" | "any"
+      - cap_preference: "large" | "mid" | "small" | "any"
+    """
+    if not preferences or not results:
+        return results
+
+    risk = preferences.get("risk_tolerance", "any")
+    focus = preferences.get("focus", "any")
+    cap_pref = preferences.get("cap_preference", "any")
+
+    reweighted = []
+    for r in results:
+        score = r.get("score", 0)
+        beta = r.get("beta", 1.0) or 1.0
+        dividend = r.get("dividend_yield", 0) or 0
+        market_cap = r.get("market_cap", 0) or 0
+
+        multiplier = 1.0
+
+        # Risk tolerance
+        if risk == "low":
+            if beta < 1.0:
+                multiplier *= 1.2
+            elif beta > 1.5:
+                multiplier *= 0.6
+        elif risk == "high":
+            if beta > 1.5:
+                multiplier *= 1.2
+            elif beta < 0.8:
+                multiplier *= 0.7
+
+        # Focus
+        if focus == "dividend":
+            if dividend > 1.0:
+                multiplier *= 1.3
+            elif dividend == 0:
+                multiplier *= 0.7
+        elif focus == "growth":
+            if dividend == 0 or dividend < 0.5:
+                multiplier *= 1.2
+            elif dividend > 2.0:
+                multiplier *= 0.7
+
+        # Market cap preference
+        if cap_pref == "large" and market_cap < CAP_THRESHOLDS["large"]:
+            multiplier *= 0.6
+        elif cap_pref == "small" and market_cap > CAP_THRESHOLDS["small"]:
+            multiplier *= 0.6
+        elif cap_pref == "mid":
+            if market_cap < CAP_THRESHOLDS["mid_low"] or market_cap > CAP_THRESHOLDS["large"]:
+                multiplier *= 0.6
+
+        result = dict(r)
+        result["score"] = score * multiplier
+        reweighted.append(result)
+
+    reweighted.sort(key=lambda x: x["score"], reverse=True)
+    return reweighted
 
 def recommend_from_ticker_global_peers(ticker, top_n=6):
     index = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
