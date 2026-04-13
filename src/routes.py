@@ -158,6 +158,16 @@ def recommend_from_text_query(query, top_n=10, method="hybrid"):
         if not results:
             tfidf = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
             results = tfidf.search(q, STOPWORDS, top_n)
+        else:
+            tfidf = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
+            for row in results:
+                if row.get("explanation"):
+                    continue
+                ex = tfidf.explain_for_ticker_query(
+                    q, STOPWORDS, row["ticker"], score_breakdown_final=row["score"]
+                )
+                if ex:
+                    row["explanation"] = ex
         return results
 
     # hybrid: SVD + tfidf
@@ -181,6 +191,12 @@ def recommend_from_text_query(query, top_n=10, method="hybrid"):
         combined = SVD_WEIGHT * info["svd"] + TFIDF_WEIGHT * info["tfidf"]
         result = dict(info["data"])
         result["score"] = combined
+        if not result.get("explanation"):
+            ex = tfidf_index.explain_for_ticker_query(
+                q, STOPWORDS, ticker, score_breakdown_final=combined
+            )
+            if ex:
+                result["explanation"] = ex
         ranked.append(result)
 
     ranked.sort(key=lambda x: x["score"], reverse=True)
@@ -189,7 +205,7 @@ def recommend_from_text_query(query, top_n=10, method="hybrid"):
 
 def recommend_from_ticker_global_peers(ticker, top_n=6):
     index = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
-    return index.similar_companies(ticker, top_n)
+    return index.similar_companies(ticker, top_n, STOPWORDS)
 
 def register_routes(app):
     @app.route('/', defaults={'path': ''})

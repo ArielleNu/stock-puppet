@@ -162,15 +162,14 @@ class CompanyTfidfIndex:
             symbol_to_doc_id,
         )
 
-    def search(self, query: str, stopwords: Set[str], top_n: int) -> List[Dict[str, Any]]:
-        if top_n <= 0 or not self.companies:
-            return []
-
+    def _prepare_query_weights(
+        self, query: str, stopwords: Set[str]
+    ) -> Optional[Tuple[List[str], List[str], Dict[str, float], float]]:
+        """Tokenize query, map OOV tokens to nearest vocab, return TF-IDF query vector."""
         q_tokens = tokenize(query, stopwords)
         if not q_tokens:
-            return []
+            return None
 
-        # if a query token isn't in the vocabulary, find the closest term by edit distance
         corrected = []
         for t in q_tokens:
             if t in self._idf:
@@ -186,12 +185,11 @@ class CompanyTfidfIndex:
                         best_term = vocab_term
                 if best_term and best_dist <= 2:
                     corrected.append(best_term)
-        
+
         if not corrected:
-            return []
+            return None
 
         q_tf = Counter(corrected)
-
         q_weights: Dict[str, float] = {}
         for term, cnt in q_tf.items():
             if term not in self._idf:
@@ -199,11 +197,112 @@ class CompanyTfidfIndex:
             q_weights[term] = _tf_weight(cnt) * self._idf[term]
 
         if not q_weights:
-            return []
+            return None
 
         norm_q = math.sqrt(sum(w * w for w in q_weights.values()))
         if norm_q == 0:
+            return None
+
+        return q_tokens, corrected, q_weights, norm_q
+
+    def explain_for_ticker_query(
+        self,
+        query: str,
+        stopwords: Set[str],
+        ticker: str,
+        *,
+        score_breakdown_final: Optional[float] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Build TF-IDF-based explainability for one company vs a text query.
+        Used to attach explanations to SVD / hybrid rows that lack them.
+        """
+        prep = self._prepare_query_weights(query, stopwords)
+        if not prep:
+            return None
+        q_tokens, corrected, q_weights, norm_q = prep
+        doc_id = self._symbol_to_doc_id.get(ticker.strip().upper())
+        if doc_id is None:
+            return None
+
+        dot = 0.0
+        term_contribs: Dict[str, float] = defaultdict(float)
+        for term, qw in q_weights.items():
+            postings = self._inverted.get(term)
+            if not postings:
+                continue
+            for did, w_td in postings:
+                if did != doc_id:
+                    continue
+                contrib = qw * w_td
+                dot += contrib
+                term_contribs[term] += contrib
+
+        dn = self._doc_norms[doc_id]
+        if dn == 0 or norm_q == 0:
+            return None
+
+        base_cos = dot / (norm_q * dn) if dot > 0 else 0.0
+        top_terms = sorted(
+            term_contribs.items(), key=lambda kv: kv[1], reverse=True
+        )[:5]
+
+        sent, sent_pos, sent_neg = estimate_description_sentiment(
+            self.companies[doc_id], stopwords
+        )
+        sentiment_weight = 0.08
+        tfidf_final = (
+            base_cos * (1.0 + sentiment_weight * sent) if base_cos > 0 else 0.0
+        )
+        sent_impact = tfidf_final - base_cos
+
+        excluded = set(q_tokens) | set(corrected)
+        related_terms = top_related_terms_from_doc_vector(
+            self._doc_vectors[doc_id], excluded, top_n=5
+        )
+
+        final_for_explanation = (
+            score_breakdown_final if score_breakdown_final is not None else tfidf_final
+        )
+
+        explanation = build_stock_explanation(
+            self.companies[doc_id],
+            top_terms,
+            related_terms,
+            q_tokens,
+            corrected,
+            sent,
+            sent_pos,
+            sent_neg,
+            sent_impact,
+            base_cos,
+            final_for_explanation,
+        )
+
+        if base_cos < 1e-9 and score_breakdown_final is not None and score_breakdown_final > 0.05:
+            note = (
+                "Strong latent (embedding) similarity with the query; "
+                "little or no direct keyword overlap in the text index."
+            )
+            reasons = explanation.get("reasons") or []
+            explanation["reasons"] = [note] + list(reasons)
+
+        if score_breakdown_final is not None:
+            sb = explanation.get("score_breakdown") or {}
+            sb["final_score"] = round(score_breakdown_final, 6)
+            explanation["score_breakdown"] = sb
+
+        return explanation
+
+    def search(self, query: str, stopwords: Set[str], top_n: int) -> List[Dict[str, Any]]:
+        if top_n <= 0 or not self.companies:
             return []
+
+        prep = self._prepare_query_weights(query, stopwords)
+        if not prep:
+            return []
+
+        q_tokens, corrected, q_weights, norm_q = prep
 
         dot_acc: Dict[int, float] = defaultdict(float)
         term_contrib_acc: Dict[int, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
@@ -263,7 +362,9 @@ class CompanyTfidfIndex:
             out.append(api_item)
         return out
 
-    def similar_companies(self, ticker: str, top_n: int) -> List[Dict[str, Any]]:
+    def similar_companies(
+        self, ticker: str, top_n: int, stopwords: Set[str]
+    ) -> List[Dict[str, Any]]:
         if top_n <= 0 or not ticker:
             return []
         doc_id = self._symbol_to_doc_id.get(ticker.strip().upper())
@@ -273,6 +374,9 @@ class CompanyTfidfIndex:
         center_norm = self._doc_norms[doc_id]
         if center_norm == 0:
             return []
+
+        anchor_company = self.companies[doc_id]
+        query_text = _company_to_doc_text(anchor_company)
 
         dot_acc: Dict[int, float] = defaultdict(float)
         center_vec = self._doc_vectors[doc_id]
@@ -295,7 +399,17 @@ class CompanyTfidfIndex:
         scored.sort(key=lambda x: x[1], reverse=True)
         out: List[Dict[str, Any]] = []
         for other_doc_id, cos in scored[:top_n]:
-            out.append(_company_to_api_dict(self.companies[other_doc_id], cos))
+            company = self.companies[other_doc_id]
+            sym = (company.get("symbol") or "").strip().upper()
+            explanation = None
+            if sym:
+                explanation = self.explain_for_ticker_query(
+                    query_text,
+                    stopwords,
+                    sym,
+                    score_breakdown_final=cos,
+                )
+            out.append(_company_to_api_dict(company, cos, explanation))
         return out
 
 
