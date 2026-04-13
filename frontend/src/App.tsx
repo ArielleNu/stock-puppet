@@ -91,6 +91,14 @@ function getPeerNodes(center: Stock, peers: Stock[]): PeerNode[] {
   return [centerNode, ...peerNodes];
 }
 
+function parsePortfolioInput(value: string): string[] {
+  // Accept comma, space, and newline-delimited entries.
+  return value
+    .split(/[\s,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function App(): JSX.Element {
   const [useLlm, setUseLlm] = useState<boolean | null>(null);
   const [queryMode, setQueryMode] = useState<QueryMode>("text");
@@ -129,18 +137,25 @@ function App(): JSX.Element {
     setHasSearched(true);
     setExpandedIdx(null);
     try {
-      if (queryMode !== "text") {
-        // Backend portfolio matching is currently not implemented.
-        setError("Portfolio matching is not implemented yet.");
+      const payload =
+        queryMode === "portfolio"
+          ? { portfolio: parsePortfolioInput(value) }
+          : { query: value };
+
+      if (
+        queryMode === "portfolio" &&
+        (!payload.portfolio || payload.portfolio.length === 0)
+      ) {
         setStocks([]);
+        setError("Enter at least one ticker or company name.");
         return;
       }
 
-      // Theme Search -> backend baseline endpoint
+      // Theme Search and Portfolio Match share backend endpoint.
       const res = await fetch("/api/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: value }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
