@@ -26,6 +26,12 @@ function getTickerColor(ticker: string): string {
   );
 }
 
+function getMatchColor(pct: number): string {
+  if (pct >= 75) return "var(--bullish)";
+  if (pct >= 40) return "var(--match-mid)";
+  return "var(--text-muted)";
+}
+
 function formatMarketCap(cap: number | string | undefined): string {
   if (cap === undefined || cap === null) return "—";
   if (typeof cap === "string") return cap;
@@ -91,6 +97,9 @@ function App(): JSX.Element {
         description?: string;
         image?: string;
         website?: string;
+        city?: string;
+        state?: string;
+        country?: string;
       }>;
 
       const maxScore =
@@ -109,7 +118,9 @@ function App(): JSX.Element {
         dividend_yield: d.dividend_yield,
         website: d.website,
         image: d.image,
-        // sentiment isn't provided by /api/recommend (yet)
+        city: d.city,
+        state: d.state,
+        country: d.country,
       }));
 
       setStocks(mapped);
@@ -161,7 +172,7 @@ function App(): JSX.Element {
         </div>
       </nav>
 
-      <div className="hero">
+      <div className={`hero ${hasSearched && stocks.length > 0 ? "hero-compact" : ""}`}>
         <div className="hero-logo">
           <svg
             className="logo-marionette"
@@ -338,6 +349,26 @@ function App(): JSX.Element {
         </form>
       </div>
 
+      {loading && (
+        <div className="screener">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="skeleton-row">
+              <div className="skeleton-badge" />
+              <div className="skeleton-info">
+                <div className="skeleton-line skeleton-line-title" />
+                <div className="skeleton-line skeleton-line-sub" />
+                <div className="skeleton-line skeleton-line-desc" />
+              </div>
+              <div className="skeleton-cells">
+                <div className="skeleton-cell" />
+                <div className="skeleton-cell" />
+                <div className="skeleton-cell" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {error && (
         <div className="state-message error-state">
           <svg
@@ -394,9 +425,17 @@ function App(): JSX.Element {
               const isExpanded = expandedIdx === i;
               return (
                 <div
-                  key={i}
+                  key={`${stock.ticker}-${i}`}
                   className={`row ${isExpanded ? "row-expanded" : ""}`}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => setExpandedIdx(isExpanded ? null : i)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setExpandedIdx(isExpanded ? null : i);
+                    }
+                  }}
                 >
                   <div className="row-top-section">
                     <div className="row-main">
@@ -436,10 +475,16 @@ function App(): JSX.Element {
                         <span className="match-bar-bg">
                           <span
                             className="match-bar-fill"
-                            style={{ width: `${stock.similarity * 100}%` }}
+                            style={{
+                              width: `${stock.similarity * 100}%`,
+                              background: getMatchColor(stock.similarity * 100),
+                            }}
                           />
                         </span>
-                        <span className="match-pct">
+                        <span
+                          className="match-pct"
+                          style={{ color: getMatchColor(stock.similarity * 100) }}
+                        >
                           {(stock.similarity * 100).toFixed(0)}%
                         </span>
                       </span>
@@ -486,6 +531,16 @@ function App(): JSX.Element {
                               : "—"}
                           </span>
                         </div>
+                        {(stock.city || stock.state || stock.country) && (
+                          <div className="expanded-col">
+                            <span className="expanded-label">Headquarters</span>
+                            <span className="expanded-value">
+                              {[stock.city, stock.state, stock.country]
+                                .filter(Boolean)
+                                .join(", ")}
+                            </span>
+                          </div>
+                        )}
                         {stock.website && (
                           <div className="expanded-col">
                             <span className="expanded-label">Website</span>
