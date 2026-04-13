@@ -1,4 +1,4 @@
-// GET /api/search?query=...&mode=text|portfolio -> Stock[]
+// POST /api/recommend { query } -> Stock[]
 // similarity: 0-1, sentiment: roughly -1 to 1
 
 export interface Stock {

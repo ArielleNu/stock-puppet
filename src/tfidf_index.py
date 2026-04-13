@@ -68,6 +68,9 @@ def _company_to_api_dict(
         "description": company.get("description"),
         "website": company.get("website"),
         "image": company.get("image"),
+        "city": company.get("city"),
+        "state": company.get("state"),
+        "country": company.get("country"),
         "score": score,
     }
     if explanation:
