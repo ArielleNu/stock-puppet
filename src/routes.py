@@ -7,6 +7,7 @@ import os
 from flask import send_from_directory, request, jsonify
 from models import db, Episode, Review, Company
 from tfidf_index import get_company_tfidf_index
+from svd_index import get_company_svd_index
 
 # ── AI toggle ────────────────────────────────────────────────────────────────
 USE_LLM = False
@@ -21,6 +22,9 @@ COMPANY_DATA_PATH = os.path.join(SRC_DIR, "data", "company-data.json")
 STOPWORDS = {
     "the", "and", "or", "of", "in", "to", "for", "a", "an", "with", "that"
 }
+
+SVD_WEIGHT = 0.6
+TFIDF_WEIGHT = 0.4
 
 def json_search(query):
     if not query or not query.strip():
@@ -75,19 +79,55 @@ def recommend_stocks(portfolio, top_n=5):
     # TODO: Finish
     raise NotImplementedError
 
-def recommend_from_text_query(query, top_n=10):
+def recommend_from_text_query(query, top_n=10, method="hybrid"):
     """
-    Returns companies ranked by TF–IDF cosine similarity to the query.
+    Returns companies ranked by similarity to the query.
 
-    Uses an inverted index over `company-data.json` (rebuilt when that file
-    changes). Document text combines symbol, name, sector, industry, and
-    description with extra weight on the first four (repeated tokens).
+    method can be "hybrid" (default), "svd", or "tfidf".
+    Hybrid blends both: combined = 0.6*svd + 0.4*tfidf.
     """
     if not query or not query.strip():
         return []
 
-    index = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
-    return index.search(query.strip(), STOPWORDS, top_n)
+    q = query.strip()
+
+    if method == "tfidf":
+        index = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
+        return index.search(q, STOPWORDS, top_n)
+
+    if method == "svd":
+        index = get_company_svd_index(COMPANY_DATA_PATH, STOPWORDS)
+        results = index.search(q, top_n)
+        if not results:
+            tfidf = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
+            results = tfidf.search(q, STOPWORDS, top_n)
+        return results
+
+    # hybrid: SVD + tfidf
+    svd_index = get_company_svd_index(COMPANY_DATA_PATH, STOPWORDS)
+    tfidf_index = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
+
+    svd_results = svd_index.search(q, top_n=50)
+    tfidf_results = tfidf_index.search(q, STOPWORDS, top_n=50)
+
+    merged = {}
+    for r in svd_results:
+        merged[r["ticker"]] = {"svd": r["score"], "tfidf": 0.0, "data": r}
+    for r in tfidf_results:
+        if r["ticker"] in merged:
+            merged[r["ticker"]]["tfidf"] = r["score"]
+        else:
+            merged[r["ticker"]] = {"svd": 0.0, "tfidf": r["score"], "data": r}
+
+    ranked = []
+    for ticker, info in merged.items():
+        combined = SVD_WEIGHT * info["svd"] + TFIDF_WEIGHT * info["tfidf"]
+        result = dict(info["data"])
+        result["score"] = combined
+        ranked.append(result)
+
+    ranked.sort(key=lambda x: x["score"], reverse=True)
+    return ranked[:top_n]
 
 def register_routes(app):
     @app.route('/', defaults={'path': ''})
@@ -120,9 +160,10 @@ def register_routes(app):
 
         query = data.get("query", "")
         portfolio = data.get("portfolio", [])
+        method = data.get("method", "hybrid")
 
         if query:
-            results = recommend_from_text_query(query)
+            results = recommend_from_text_query(query, method=method)
             return jsonify(results)
         
         if portfolio:

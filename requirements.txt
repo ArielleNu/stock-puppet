@@ -7,3 +7,6 @@ gunicorn
 python-dotenv
 git+https://github.com/MrPeterss/infosci-spark-client.git
 requests==2.32.3
+scikit-learn
+numpy
+scipy
