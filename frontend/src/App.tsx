@@ -35,6 +35,13 @@ function formatMarketCap(cap: number | string | undefined): string {
   return `$${cap.toLocaleString()}`;
 }
 
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
+
 type PeerNode = {
   ticker: string;
   similarity: number;
@@ -149,6 +156,7 @@ function App(): JSX.Element {
         description?: string;
         image?: string;
         website?: string;
+        explanation?: Stock["explanation"];
       }>;
 
       const maxScore =
@@ -167,6 +175,7 @@ function App(): JSX.Element {
         dividend_yield: d.dividend_yield,
         website: d.website,
         image: d.image,
+        explanation: d.explanation,
         // sentiment isn't provided by /api/recommend (yet)
       }));
 
@@ -213,6 +222,7 @@ function App(): JSX.Element {
         description?: string;
         image?: string;
         website?: string;
+        explanation?: Stock["explanation"];
       }>;
       const maxScore =
         Math.max(
@@ -229,6 +239,7 @@ function App(): JSX.Element {
         dividend_yield: d.dividend_yield,
         website: d.website,
         image: d.image,
+        explanation: d.explanation,
       }));
       setGlobalPeersByTicker((prev) => ({ ...prev, [ticker]: mapped }));
     } catch {
@@ -555,6 +566,11 @@ function App(): JSX.Element {
                         <span className="row-desc">
                           {stock.description ?? ""}
                         </span>
+                        {stock.explanation?.short && (
+                          <span className="row-explainer">
+                            Why: {stock.explanation.short}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="row-data">
@@ -634,6 +650,206 @@ function App(): JSX.Element {
                         <div className="expanded-desc-full">
                           <span className="expanded-label">About</span>
                           <p>{stock.description}</p>
+                        </div>
+                      )}
+                      {stock.explanation && (
+                        <div className="expanded-explanation">
+                          <span className="expanded-label">Why this was recommended</span>
+                          {stock.explanation.reasons &&
+                            stock.explanation.reasons.length > 0 && (
+                              <ul className="expanded-reason-list">
+                                {stock.explanation.reasons
+                                  .filter(
+                                    (reason) =>
+                                      !reason.toLowerCase().startsWith("evidence:"),
+                                  )
+                                  .slice(0, 3)
+                                  .map((reason, idx) => (
+                                    <li key={`${stock.ticker}-reason-${idx}`}>{reason}</li>
+                                  ))}
+                              </ul>
+                            )}
+                          {stock.explanation.matched_terms &&
+                            stock.explanation.matched_terms.length > 0 && (
+                              <div className="term-chip-wrap">
+                                {stock.explanation.matched_terms
+                                  .slice(0, 3)
+                                  .map((termObj) => (
+                                    <span
+                                      key={`${stock.ticker}-term-${termObj.term}`}
+                                      className={`term-chip ${termObj.match_type ?? ""}`}
+                                    >
+                                      {termObj.term}
+                                    </span>
+                                  ))}
+                              </div>
+                            )}
+                          {stock.explanation.semantic_matches &&
+                            stock.explanation.semantic_matches.length > 0 && (
+                              <div className="related-terms-row">
+                                <span className="expanded-label">Related terms</span>
+                                <span className="related-terms-text">
+                                  {stock.explanation.semantic_matches
+                                    .slice(0, 4)
+                                    .join(", ")}
+                                </span>
+                              </div>
+                            )}
+                          {stock.explanation.score_breakdown && (
+                            <div className="score-breakdown-card">
+                              <span className="expanded-label">Score Breakdown</span>
+                              {(() => {
+                                const textScore =
+                                  stock.explanation?.score_breakdown?.text_similarity ?? 0;
+                                const sentimentImpact =
+                                  stock.explanation?.score_breakdown?.sentiment_impact ?? 0;
+                                const finalScore =
+                                  stock.explanation?.score_breakdown?.final_score ?? 0;
+                                const maxVal = Math.max(
+                                  0.01,
+                                  textScore,
+                                  finalScore,
+                                  Math.abs(sentimentImpact),
+                                );
+                                const textWidth = clamp01(textScore / maxVal) * 100;
+                                const sentimentWidth =
+                                  clamp01(Math.abs(sentimentImpact) / maxVal) * 100;
+                                const finalWidth = clamp01(finalScore / maxVal) * 100;
+                                const matchedTerms =
+                                  stock.explanation?.matched_terms?.slice(0, 4) ?? [];
+                                const relatedDetails =
+                                  stock.explanation?.semantic_match_details?.slice(0, 4) ??
+                                  [];
+                                const queryTerms = stock.explanation?.query_terms ?? [];
+                                const matchedQueryCount = queryTerms.filter((qt) =>
+                                  matchedTerms.some((mt) => mt.term === qt),
+                                ).length;
+                                return (
+                                  <div className="score-breakdown-bars">
+                                    <div className="score-breakdown-row">
+                                      <span className="score-breakdown-name">
+                                        Text similarity
+                                      </span>
+                                      <div className="score-breakdown-track">
+                                        <span
+                                          className="score-breakdown-fill text"
+                                          style={{ width: `${textWidth}%` }}
+                                        />
+                                      </div>
+                                      <span className="score-breakdown-value">
+                                        {textScore.toFixed(3)}
+                                      </span>
+                                    </div>
+                                    <div className="score-breakdown-row">
+                                      <span className="score-breakdown-name">
+                                        Sentiment adj.
+                                      </span>
+                                      <div className="score-breakdown-track">
+                                        <span
+                                          className={`score-breakdown-fill ${
+                                            sentimentImpact >= 0 ? "positive" : "negative"
+                                          }`}
+                                          style={{ width: `${sentimentWidth}%` }}
+                                        />
+                                      </div>
+                                      <span className="score-breakdown-value">
+                                        {sentimentImpact >= 0 ? "+" : ""}
+                                        {sentimentImpact.toFixed(3)}
+                                      </span>
+                                    </div>
+                                    <div className="score-breakdown-row">
+                                      <span className="score-breakdown-name">Final score</span>
+                                      <div className="score-breakdown-track">
+                                        <span
+                                          className="score-breakdown-fill final"
+                                          style={{ width: `${finalWidth}%` }}
+                                        />
+                                      </div>
+                                      <span className="score-breakdown-value">
+                                        {finalScore.toFixed(3)}
+                                      </span>
+                                    </div>
+                                    {matchedTerms.length > 0 && (
+                                      <div className="text-contrib-block">
+                                        <span className="score-breakdown-subtitle">
+                                          Text similarity contributors
+                                        </span>
+                                        {queryTerms.length > 0 && (
+                                          <span className="score-breakdown-coverage">
+                                            Query coverage: {matchedQueryCount}/
+                                            {queryTerms.length} terms
+                                          </span>
+                                        )}
+                                        {matchedTerms.map((termObj) => {
+                                          const sharePct = clamp01(
+                                            termObj.share ?? 0,
+                                          ) * 100;
+                                          return (
+                                            <div
+                                              className="score-breakdown-row term"
+                                              key={`${stock.ticker}-text-contrib-${termObj.term}`}
+                                            >
+                                              <span className="score-breakdown-name term-name">
+                                                {termObj.term}
+                                              </span>
+                                              <div className="score-breakdown-track">
+                                                <span
+                                                  className="score-breakdown-fill term"
+                                                  style={{ width: `${sharePct}%` }}
+                                                />
+                                              </div>
+                                              <span className="score-breakdown-value">
+                                                {sharePct.toFixed(0)}%
+                                              </span>
+                                            </div>
+                                          );
+                                        })}
+                                        {relatedDetails.length > 0 && (
+                                          <>
+                                            <span className="score-breakdown-subtitle">
+                                              Related concept strength
+                                            </span>
+                                            {relatedDetails.map((termObj) => {
+                                              const sharePct =
+                                                clamp01(termObj.share) * 100;
+                                              return (
+                                                <div
+                                                  className="score-breakdown-row term"
+                                                  key={`${stock.ticker}-related-contrib-${termObj.term}`}
+                                                >
+                                                  <span className="score-breakdown-name term-name">
+                                                    {termObj.term}
+                                                  </span>
+                                                  <div className="score-breakdown-track">
+                                                    <span
+                                                      className="score-breakdown-fill related"
+                                                      style={{
+                                                        width: `${sharePct}%`,
+                                                      }}
+                                                    />
+                                                  </div>
+                                                  <span className="score-breakdown-value">
+                                                    {sharePct.toFixed(0)}%
+                                                  </span>
+                                                </div>
+                                              );
+                                            })}
+                                          </>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+                          {stock.explanation.snippets &&
+                            stock.explanation.snippets.length > 0 && (
+                              <div className="explain-snippets">
+                                <span className="expanded-label">Evidence snippet</span>
+                                <p>{stock.explanation.snippets[0]}</p>
+                              </div>
+                            )}
                         </div>
                       )}
                       <div className="peer-network-card">

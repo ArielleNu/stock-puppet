@@ -10,6 +10,11 @@ import os
 import re
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional, Set, Tuple
+from explainability import (
+    build_stock_explanation,
+    estimate_description_sentiment,
+    top_related_terms_from_doc_vector,
+)
 
 _TOKEN_RE = re.compile(r"[a-zA-Z0-9]+")
 
@@ -48,8 +53,12 @@ def _tf_weight(count: int) -> float:
     return 1.0 + math.log(count)
 
 
-def _company_to_api_dict(company: Dict[str, Any], score: float) -> Dict[str, Any]:
-    return {
+def _company_to_api_dict(
+    company: Dict[str, Any],
+    score: float,
+    explanation: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    out = {
         "ticker": company.get("symbol"),
         "name": company.get("companyName"),
         "sector": company.get("sector"),
@@ -61,6 +70,10 @@ def _company_to_api_dict(company: Dict[str, Any], score: float) -> Dict[str, Any
         "image": company.get("image"),
         "score": score,
     }
+    if explanation:
+        out["explanation"] = explanation
+    return out
+
 
 def _edit_distance(s1: str, s2: str) -> int:
     # computing the standard edit distance
@@ -190,26 +203,61 @@ class CompanyTfidfIndex:
             return []
 
         dot_acc: Dict[int, float] = defaultdict(float)
+        term_contrib_acc: Dict[int, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
         for term, qw in q_weights.items():
             postings = self._inverted.get(term)
             if not postings:
                 continue
             for doc_id, w_td in postings:
-                dot_acc[doc_id] += qw * w_td
+                contrib = qw * w_td
+                dot_acc[doc_id] += contrib
+                term_contrib_acc[doc_id][term] += contrib
 
-        scored: List[Tuple[int, float]] = []
+        scored: List[Tuple[int, float, float, int, int, float, float]] = []
+        sentiment_weight = 0.08
         for doc_id, dot in dot_acc.items():
             dn = self._doc_norms[doc_id]
             if dn == 0:
                 continue
-            cos = dot / (norm_q * dn)
-            if cos > 0:
-                scored.append((doc_id, cos))
+            base_cos = dot / (norm_q * dn)
+            if base_cos <= 0:
+                continue
+            sent, sent_pos, sent_neg = estimate_description_sentiment(
+                self.companies[doc_id], stopwords
+            )
+            final_score = base_cos * (1.0 + sentiment_weight * sent)
+            if final_score > 0:
+                scored.append(
+                    (doc_id, final_score, sent, sent_pos, sent_neg, final_score - base_cos, base_cos)
+                )
 
         scored.sort(key=lambda x: x[1], reverse=True)
         out: List[Dict[str, Any]] = []
-        for doc_id, cos in scored[:top_n]:
-            out.append(_company_to_api_dict(self.companies[doc_id], cos))
+        for doc_id, score, sent, sent_pos, sent_neg, sent_impact, base_cos in scored[:top_n]:
+            term_contribs = term_contrib_acc.get(doc_id, {})
+            top_terms = sorted(
+                term_contribs.items(), key=lambda kv: kv[1], reverse=True
+            )[:5]
+            excluded = set(q_tokens) | set(corrected)
+            related_terms = top_related_terms_from_doc_vector(
+                self._doc_vectors[doc_id], excluded, top_n=5
+            )
+            explanation = build_stock_explanation(
+                self.companies[doc_id],
+                top_terms,
+                related_terms,
+                q_tokens,
+                corrected,
+                sent,
+                sent_pos,
+                sent_neg,
+                sent_impact,
+                base_cos,
+                score,
+            )
+            api_item = _company_to_api_dict(self.companies[doc_id], score, explanation)
+            api_item["sentiment"] = sent
+            out.append(api_item)
         return out
 
     def similar_companies(self, ticker: str, top_n: int) -> List[Dict[str, Any]]:
