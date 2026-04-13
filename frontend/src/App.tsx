@@ -35,6 +35,70 @@ function formatMarketCap(cap: number | string | undefined): string {
   return `$${cap.toLocaleString()}`;
 }
 
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
+
+type PeerNode = {
+  ticker: string;
+  similarity: number;
+  x: number;
+  y: number;
+  isCenter: boolean;
+  sector?: string;
+  marketCap?: number | string;
+};
+type PeerScope = "result" | "global";
+
+function getSectorColor(sector?: string): string {
+  if (!sector) return "#787b86";
+  const hue =
+    [...sector].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % 360;
+  return `hsl(${hue}, 62%, 56%)`;
+}
+
+function getPeerNodes(center: Stock, peers: Stock[]): PeerNode[] {
+  if (!center) return [];
+
+  const centerNode: PeerNode = {
+    ticker: center.ticker,
+    similarity: 1,
+    x: 50,
+    y: 50,
+    isCenter: true,
+    sector: center.sector,
+    marketCap: center.market_cap,
+  };
+
+  const peerNodes: PeerNode[] = peers.map((stock, i) => {
+    const angle = (i / Math.max(peers.length, 1)) * Math.PI * 2 - Math.PI / 2;
+    // Higher similarity sits closer to the center.
+    const radius = 12 + (1 - stock.similarity) * 30;
+    return {
+      ticker: stock.ticker,
+      similarity: stock.similarity,
+      x: 50 + Math.cos(angle) * radius,
+      y: 50 + Math.sin(angle) * radius,
+      isCenter: false,
+      sector: stock.sector,
+      marketCap: stock.market_cap,
+    };
+  });
+
+  return [centerNode, ...peerNodes];
+}
+
+function parsePortfolioInput(value: string): string[] {
+  // Accept comma, space, and newline-delimited entries.
+  return value
+    .split(/[\s,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function App(): JSX.Element {
   const [useLlm, setUseLlm] = useState<boolean | null>(null);
   const [queryMode, setQueryMode] = useState<QueryMode>("text");
@@ -44,6 +108,15 @@ function App(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState<boolean>(false);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const [peerScopeByTicker, setPeerScopeByTicker] = useState<
+    Record<string, PeerScope>
+  >({});
+  const [globalPeersByTicker, setGlobalPeersByTicker] = useState<
+    Record<string, Stock[]>
+  >({});
+  const [globalPeersLoading, setGlobalPeersLoading] = useState<
+    Record<string, boolean>
+  >({});
 
   useEffect(() => {
     fetch("/api/config")
@@ -64,18 +137,25 @@ function App(): JSX.Element {
     setHasSearched(true);
     setExpandedIdx(null);
     try {
-      if (queryMode !== "text") {
-        // Backend portfolio matching is currently not implemented.
-        setError("Portfolio matching is not implemented yet.");
+      const payload =
+        queryMode === "portfolio"
+          ? { portfolio: parsePortfolioInput(value) }
+          : { query: value };
+
+      if (
+        queryMode === "portfolio" &&
+        (!payload.portfolio || payload.portfolio.length === 0)
+      ) {
         setStocks([]);
+        setError("Enter at least one ticker or company name.");
         return;
       }
 
-      // Theme Search -> backend baseline endpoint
+      // Theme Search and Portfolio Match share backend endpoint.
       const res = await fetch("/api/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ query: value }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
@@ -91,6 +171,7 @@ function App(): JSX.Element {
         description?: string;
         image?: string;
         website?: string;
+        explanation?: Stock["explanation"];
       }>;
 
       const maxScore =
@@ -109,6 +190,7 @@ function App(): JSX.Element {
         dividend_yield: d.dividend_yield,
         website: d.website,
         image: d.image,
+        explanation: d.explanation,
         // sentiment isn't provided by /api/recommend (yet)
       }));
 
@@ -130,6 +212,56 @@ function App(): JSX.Element {
     if (score >= 0.3) return { label: "Bullish", cls: "bullish" };
     if (score <= -0.3) return { label: "Bearish", cls: "bearish" };
     return { label: "Neutral", cls: "neutral" };
+  };
+
+  const handlePeerScopeChange = async (
+    ticker: string,
+    scope: PeerScope,
+  ): Promise<void> => {
+    setPeerScopeByTicker((prev) => ({ ...prev, [ticker]: scope }));
+    if (scope !== "global" || globalPeersByTicker[ticker]) {
+      return;
+    }
+    setGlobalPeersLoading((prev) => ({ ...prev, [ticker]: true }));
+    try {
+      const res = await fetch(`/api/peers/${ticker}?limit=6`);
+      if (!res.ok) throw new Error(`Failed to load peers (${res.status})`);
+      const data = (await res.json()) as Array<{
+        ticker: string;
+        name: string;
+        score?: number;
+        sector?: string;
+        industry?: string;
+        market_cap?: number | string;
+        dividend_yield?: number;
+        description?: string;
+        image?: string;
+        website?: string;
+        explanation?: Stock["explanation"];
+      }>;
+      const maxScore =
+        Math.max(
+          ...data.map((d) => (typeof d.score === "number" ? d.score : 0)),
+        ) || 1;
+      const mapped: Stock[] = data.map((d) => ({
+        ticker: d.ticker,
+        name: d.name,
+        similarity: (typeof d.score === "number" ? d.score : 0) / maxScore,
+        sector: d.sector,
+        industry: d.industry,
+        description: d.description,
+        market_cap: d.market_cap,
+        dividend_yield: d.dividend_yield,
+        website: d.website,
+        image: d.image,
+        explanation: d.explanation,
+      }));
+      setGlobalPeersByTicker((prev) => ({ ...prev, [ticker]: mapped }));
+    } catch {
+      setGlobalPeersByTicker((prev) => ({ ...prev, [ticker]: [] }));
+    } finally {
+      setGlobalPeersLoading((prev) => ({ ...prev, [ticker]: false }));
+    }
   };
 
   if (useLlm === null) return <></>;
@@ -392,6 +524,26 @@ function App(): JSX.Element {
                   ? getSentimentInfo(stock.sentiment)
                   : null;
               const isExpanded = expandedIdx === i;
+              const peerScope = peerScopeByTicker[stock.ticker] ?? "result";
+              const resultPeers = stocks
+                .filter((s) => s.ticker !== stock.ticker)
+                .sort((a, b) => b.similarity - a.similarity)
+                .slice(0, 6);
+              const selectedPeers =
+                peerScope === "global"
+                  ? globalPeersByTicker[stock.ticker] ?? []
+                  : resultPeers;
+              const peerNodes = getPeerNodes(stock, selectedPeers);
+              const centerNode = peerNodes[0];
+              const peerOnlyNodes = peerNodes.slice(1);
+              const peerCount = Math.max(peerNodes.length - 1, 0);
+              const sectorLegend = Array.from(
+                new Map(
+                  peerOnlyNodes
+                    .filter((node) => node.sector)
+                    .map((node) => [node.sector as string, node]),
+                ).entries(),
+              ).slice(0, 4);
               return (
                 <div
                   key={i}
@@ -429,6 +581,11 @@ function App(): JSX.Element {
                         <span className="row-desc">
                           {stock.description ?? ""}
                         </span>
+                        {stock.explanation?.short && (
+                          <span className="row-explainer">
+                            Why: {stock.explanation.short}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="row-data">
@@ -510,6 +667,361 @@ function App(): JSX.Element {
                           <p>{stock.description}</p>
                         </div>
                       )}
+                      {stock.explanation && (
+                        <div className="expanded-explanation">
+                          <span className="expanded-label">Why this was recommended</span>
+                          {stock.explanation.reasons &&
+                            stock.explanation.reasons.length > 0 && (
+                              <ul className="expanded-reason-list">
+                                {stock.explanation.reasons
+                                  .filter(
+                                    (reason) =>
+                                      !reason.toLowerCase().startsWith("evidence:"),
+                                  )
+                                  .slice(0, 3)
+                                  .map((reason, idx) => (
+                                    <li key={`${stock.ticker}-reason-${idx}`}>{reason}</li>
+                                  ))}
+                              </ul>
+                            )}
+                          {stock.explanation.matched_terms &&
+                            stock.explanation.matched_terms.length > 0 && (
+                              <div className="term-chip-wrap">
+                                {stock.explanation.matched_terms
+                                  .slice(0, 3)
+                                  .map((termObj) => (
+                                    <span
+                                      key={`${stock.ticker}-term-${termObj.term}`}
+                                      className={`term-chip ${termObj.match_type ?? ""}`}
+                                    >
+                                      {termObj.term}
+                                    </span>
+                                  ))}
+                              </div>
+                            )}
+                          {stock.explanation.semantic_matches &&
+                            stock.explanation.semantic_matches.length > 0 && (
+                              <div className="related-terms-row">
+                                <span className="expanded-label">Related terms</span>
+                                <span className="related-terms-text">
+                                  {stock.explanation.semantic_matches
+                                    .slice(0, 4)
+                                    .join(", ")}
+                                </span>
+                              </div>
+                            )}
+                          {stock.explanation.score_breakdown && (
+                            <div className="score-breakdown-card">
+                              <span className="expanded-label">Score Breakdown</span>
+                              {(() => {
+                                const textScore =
+                                  stock.explanation?.score_breakdown?.text_similarity ?? 0;
+                                const sentimentImpact =
+                                  stock.explanation?.score_breakdown?.sentiment_impact ?? 0;
+                                const finalScore =
+                                  stock.explanation?.score_breakdown?.final_score ?? 0;
+                                const maxVal = Math.max(
+                                  0.01,
+                                  textScore,
+                                  finalScore,
+                                  Math.abs(sentimentImpact),
+                                );
+                                const textWidth = clamp01(textScore / maxVal) * 100;
+                                const sentimentWidth =
+                                  clamp01(Math.abs(sentimentImpact) / maxVal) * 100;
+                                const finalWidth = clamp01(finalScore / maxVal) * 100;
+                                const matchedTerms =
+                                  stock.explanation?.matched_terms?.slice(0, 4) ?? [];
+                                const relatedDetails =
+                                  stock.explanation?.semantic_match_details?.slice(0, 4) ??
+                                  [];
+                                const queryTerms = stock.explanation?.query_terms ?? [];
+                                const matchedQueryCount = queryTerms.filter((qt) =>
+                                  matchedTerms.some((mt) => mt.term === qt),
+                                ).length;
+                                return (
+                                  <div className="score-breakdown-bars">
+                                    <div className="score-breakdown-row">
+                                      <span className="score-breakdown-name">
+                                        Text similarity
+                                      </span>
+                                      <div className="score-breakdown-track">
+                                        <span
+                                          className="score-breakdown-fill text"
+                                          style={{ width: `${textWidth}%` }}
+                                        />
+                                      </div>
+                                      <span className="score-breakdown-value">
+                                        {textScore.toFixed(3)}
+                                      </span>
+                                    </div>
+                                    <div className="score-breakdown-row">
+                                      <span className="score-breakdown-name">
+                                        Sentiment adj.
+                                      </span>
+                                      <div className="score-breakdown-track">
+                                        <span
+                                          className={`score-breakdown-fill ${
+                                            sentimentImpact >= 0 ? "positive" : "negative"
+                                          }`}
+                                          style={{ width: `${sentimentWidth}%` }}
+                                        />
+                                      </div>
+                                      <span className="score-breakdown-value">
+                                        {sentimentImpact >= 0 ? "+" : ""}
+                                        {sentimentImpact.toFixed(3)}
+                                      </span>
+                                    </div>
+                                    <div className="score-breakdown-row">
+                                      <span className="score-breakdown-name">Final score</span>
+                                      <div className="score-breakdown-track">
+                                        <span
+                                          className="score-breakdown-fill final"
+                                          style={{ width: `${finalWidth}%` }}
+                                        />
+                                      </div>
+                                      <span className="score-breakdown-value">
+                                        {finalScore.toFixed(3)}
+                                      </span>
+                                    </div>
+                                    {matchedTerms.length > 0 && (
+                                      <div className="text-contrib-block">
+                                        <span className="score-breakdown-subtitle">
+                                          Text similarity contributors
+                                        </span>
+                                        {queryTerms.length > 0 && (
+                                          <span className="score-breakdown-coverage">
+                                            Query coverage: {matchedQueryCount}/
+                                            {queryTerms.length} terms
+                                          </span>
+                                        )}
+                                        {matchedTerms.map((termObj) => {
+                                          const sharePct = clamp01(
+                                            termObj.share ?? 0,
+                                          ) * 100;
+                                          return (
+                                            <div
+                                              className="score-breakdown-row term"
+                                              key={`${stock.ticker}-text-contrib-${termObj.term}`}
+                                            >
+                                              <span className="score-breakdown-name term-name">
+                                                {termObj.term}
+                                              </span>
+                                              <div className="score-breakdown-track">
+                                                <span
+                                                  className="score-breakdown-fill term"
+                                                  style={{ width: `${sharePct}%` }}
+                                                />
+                                              </div>
+                                              <span className="score-breakdown-value">
+                                                {sharePct.toFixed(0)}%
+                                              </span>
+                                            </div>
+                                          );
+                                        })}
+                                        {relatedDetails.length > 0 && (
+                                          <>
+                                            <span className="score-breakdown-subtitle">
+                                              Related concept strength
+                                            </span>
+                                            {relatedDetails.map((termObj) => {
+                                              const sharePct =
+                                                clamp01(termObj.share) * 100;
+                                              return (
+                                                <div
+                                                  className="score-breakdown-row term"
+                                                  key={`${stock.ticker}-related-contrib-${termObj.term}`}
+                                                >
+                                                  <span className="score-breakdown-name term-name">
+                                                    {termObj.term}
+                                                  </span>
+                                                  <div className="score-breakdown-track">
+                                                    <span
+                                                      className="score-breakdown-fill related"
+                                                      style={{
+                                                        width: `${sharePct}%`,
+                                                      }}
+                                                    />
+                                                  </div>
+                                                  <span className="score-breakdown-value">
+                                                    {sharePct.toFixed(0)}%
+                                                  </span>
+                                                </div>
+                                              );
+                                            })}
+                                          </>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </div>
+                          )}
+                          {stock.explanation.snippets &&
+                            stock.explanation.snippets.length > 0 && (
+                              <div className="explain-snippets">
+                                <span className="expanded-label">Evidence snippet</span>
+                                <p>{stock.explanation.snippets[0]}</p>
+                              </div>
+                            )}
+                        </div>
+                      )}
+                      <div className="peer-network-card">
+                        <div className="peer-network-header">
+                          <span className="expanded-label">Peer Network Graph</span>
+                          <div
+                            className="peer-scope-tabs"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              type="button"
+                              className={`peer-scope-tab ${peerScope === "result" ? "active" : ""}`}
+                              onClick={() =>
+                                handlePeerScopeChange(stock.ticker, "result")
+                              }
+                            >
+                              Result Set
+                            </button>
+                            <button
+                              type="button"
+                              className={`peer-scope-tab ${peerScope === "global" ? "active" : ""}`}
+                              onClick={() =>
+                                handlePeerScopeChange(stock.ticker, "global")
+                              }
+                            >
+                              Global
+                            </button>
+                          </div>
+                          <span className="peer-network-meta">
+                            {globalPeersLoading[stock.ticker]
+                              ? "Loading global peers..."
+                              : peerCount > 0
+                                ? peerScope === "global"
+                                  ? `${peerCount} global TF-IDF peers`
+                                  : `${peerCount} nearby peers from this result set`
+                                : "No peers available"}
+                          </span>
+                        </div>
+                        <svg
+                          className="peer-network-svg"
+                          viewBox="0 0 100 100"
+                          role="img"
+                          aria-label={`Peer network for ${stock.ticker}`}
+                        >
+                          <circle cx="50" cy="50" r="14" className="peer-ring" />
+                          <circle cx="50" cy="50" r="28" className="peer-ring" />
+                          <circle cx="50" cy="50" r="42" className="peer-ring" />
+
+                          {centerNode &&
+                            peerNodes.slice(1).map((node) => (
+                              <g key={`edge-${stock.ticker}-${node.ticker}`}>
+                                <line
+                                  x1={centerNode.x}
+                                  y1={centerNode.y}
+                                  x2={node.x}
+                                  y2={node.y}
+                                  className="peer-edge"
+                                  style={{
+                                    opacity: Math.max(node.similarity, 0.2),
+                                    strokeWidth: 0.4 + node.similarity * 1.2,
+                                  }}
+                                />
+                              </g>
+                            ))}
+
+                          {peerNodes.map((node) => (
+                            <g
+                              key={`node-${stock.ticker}-${node.ticker}`}
+                              className="peer-node"
+                            >
+                              <circle
+                                cx={node.x}
+                                cy={node.y}
+                                r={node.isCenter ? 8 : 5.5}
+                                fill={
+                                  node.isCenter
+                                    ? getTickerColor(node.ticker)
+                                    : getSectorColor(node.sector)
+                                }
+                                stroke={node.isCenter ? "#ffffff" : "#4c525e"}
+                                strokeWidth={node.isCenter ? 1.2 : 0.6}
+                              />
+                              <text
+                                x={node.x}
+                                y={node.y + (node.isCenter ? 0.8 : 0.5)}
+                                textAnchor="middle"
+                                className="peer-node-label"
+                                style={{
+                                  fontSize: node.isCenter ? "3px" : "2.2px",
+                                  fontWeight: node.isCenter ? 700 : 600,
+                                }}
+                              >
+                                {node.ticker}
+                              </text>
+                            </g>
+                          ))}
+                        </svg>
+                        <div className="peer-network-scale">
+                          <span className="peer-key-title">Position key</span>
+                          <div className="peer-key-items">
+                            <span className="peer-key-item">
+                              <span className="peer-key-swatch peer-key-swatch-inner" />
+                              Center ring: more similar
+                            </span>
+                            <span className="peer-key-item">
+                              <span className="peer-key-swatch peer-key-swatch-outer" />
+                              Outer rings: less similar
+                            </span>
+                          </div>
+                        </div>
+                        {sectorLegend.length > 0 && (
+                          <div className="peer-legend">
+                            {sectorLegend.map(([sector, node]) => (
+                              <span
+                                key={`legend-${stock.ticker}-${sector}`}
+                                className="peer-legend-item"
+                              >
+                                <span
+                                  className="peer-legend-dot"
+                                  style={{
+                                    backgroundColor: getSectorColor(node.sector),
+                                  }}
+                                />
+                                {sector}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {peerOnlyNodes.length > 0 && (
+                          <div className="peer-table">
+                            <div className="peer-table-head">
+                              <span>Peer</span>
+                              <span>Sector</span>
+                              <span>Market Cap</span>
+                              <span>Similarity</span>
+                            </div>
+                            {peerOnlyNodes
+                              .slice()
+                              .sort((a, b) => b.similarity - a.similarity)
+                              .map((node) => (
+                                <div
+                                  key={`peer-row-${stock.ticker}-${node.ticker}`}
+                                  className="peer-table-row"
+                                >
+                                  <span className="peer-table-ticker">
+                                    {node.ticker}
+                                  </span>
+                                  <span>{node.sector ?? "—"}</span>
+                                  <span>{formatMarketCap(node.marketCap)}</span>
+                                  <span className="peer-table-sim">
+                                    {(node.similarity * 100).toFixed(1)}%
+                                  </span>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>

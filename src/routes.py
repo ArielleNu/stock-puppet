@@ -72,12 +72,69 @@ def recommend_stocks(portfolio, top_n=5):
     if not portfolio:
         return []
     
-    # normalize tickers
-    portfolio = [ticker.upper().strip() for ticker in portfolio if ticker.strip()]
+    raw_inputs = [item.strip() for item in portfolio if item and item.strip()]
+    if not raw_inputs:
+        return []
+    
+    normalized_inputs = list(dict.fromkeys(raw_inputs)) # dedupe
+    portfolio_tickers = set()
+    matched_companies = []
 
-    # portfolio_companies = Company.query.filter(Company.ticker.in_(portfolio)).all()
-    # TODO: Finish
-    raise NotImplementedError
+    for item in normalized_inputs:
+        item_upper = item.upper()
+
+        #try exact ticker match
+        company = Company.query.filter(
+            Company.ticker == item_upper
+        ).first()
+
+        # match by company name
+        if not company:
+            company = Company.query.filter(
+                Company.name.ilike(item)
+            ).first()
+
+        # substring match on company name
+        if not company:
+            company = Company.query.filter(
+                Company.name.ilike(f"%{item}%")
+            ).first()
+
+        if company and company.ticker not in portfolio_tickers:
+            matched_companies.append(company)
+            portfolio_tickers.add(company.ticker)
+
+    if not matched_companies:
+        return []
+    
+    # synthetic query from matched portfolio companies
+
+    query_parts = []
+
+    for company in matched_companies:
+        text = " ".join([
+            company.ticker or "",
+            company.name or "",
+            company.sector or "",
+            company.industry or "",
+            company.description or ""
+        ])
+        query_parts.append(text)
+
+    synthetic_query = " ".join(query_parts).strip()
+    if not synthetic_query:
+        return []
+    
+    # ask for extra results since we will filter portfolio
+    candidates = recommend_from_text_query(synthetic_query, top_n=top_n + len(portfolio_tickers))
+
+    # exclude portfolio companies from returned recommendations
+    filtered = [
+        company for company in candidates 
+        if company.get("ticker", "").upper() not in portfolio_tickers
+    ]
+
+    return filtered[:top_n]
 
 def recommend_from_text_query(query, top_n=10, method="hybrid"):
     """
@@ -129,6 +186,11 @@ def recommend_from_text_query(query, top_n=10, method="hybrid"):
     ranked.sort(key=lambda x: x["score"], reverse=True)
     return ranked[:top_n]
 
+
+def recommend_from_ticker_global_peers(ticker, top_n=6):
+    index = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
+    return index.similar_companies(ticker, top_n)
+
 def register_routes(app):
     @app.route('/', defaults={'path': ''})
     @app.route('/<path:path>')
@@ -167,6 +229,7 @@ def register_routes(app):
             return jsonify(results)
         
         if portfolio:
+            print("AHAHAHAHHASHSHSHDISBFKJFBSKB")
             results = recommend_stocks(portfolio)
             return jsonify(results)
 
@@ -179,6 +242,16 @@ def register_routes(app):
         ]
 
         return jsonify(results)
+
+    @app.route("/api/peers/<ticker>")
+    def global_peers(ticker: str):
+        try:
+            limit = int(request.args.get("limit") or "6")
+        except Exception:
+            limit = 6
+        limit = max(1, min(20, limit))
+        peers = recommend_from_ticker_global_peers(ticker, top_n=limit)
+        return jsonify(peers)
 
     # tester code for making sure the routes are hit correctly
     # @app.route("/api/recommend", methods=["POST"])

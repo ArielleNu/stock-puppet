@@ -10,6 +10,11 @@ import os
 import re
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional, Set, Tuple
+from explainability import (
+    build_stock_explanation,
+    estimate_description_sentiment,
+    top_related_terms_from_doc_vector,
+)
 
 _TOKEN_RE = re.compile(r"[a-zA-Z0-9]+")
 
@@ -48,8 +53,12 @@ def _tf_weight(count: int) -> float:
     return 1.0 + math.log(count)
 
 
-def _company_to_api_dict(company: Dict[str, Any], score: float) -> Dict[str, Any]:
-    return {
+def _company_to_api_dict(
+    company: Dict[str, Any],
+    score: float,
+    explanation: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    out = {
         "ticker": company.get("symbol"),
         "name": company.get("companyName"),
         "sector": company.get("sector"),
@@ -61,6 +70,10 @@ def _company_to_api_dict(company: Dict[str, Any], score: float) -> Dict[str, Any
         "image": company.get("image"),
         "score": score,
     }
+    if explanation:
+        out["explanation"] = explanation
+    return out
+
 
 def _edit_distance(s1: str, s2: str) -> int:
     # computing the standard edit distance
@@ -89,18 +102,22 @@ class CompanyTfidfIndex:
         inverted: Dict[str, List[Tuple[int, float]]],
         idf: Dict[str, float],
         doc_norms: List[float],
+        doc_vectors: List[Dict[str, float]],
+        symbol_to_doc_id: Dict[str, int],
     ) -> None:
         self.companies = companies
         self._inverted = inverted
         self._idf = idf
         self._doc_norms = doc_norms
+        self._doc_vectors = doc_vectors
+        self._symbol_to_doc_id = symbol_to_doc_id
         self._n_docs = len(companies)
 
     @classmethod
     def build(cls, companies: List[Dict[str, Any]], stopwords: Set[str]) -> CompanyTfidfIndex:
         n_docs = len(companies)
         if n_docs == 0:
-            return cls([], {}, {}, [])
+            return cls([], {}, {}, [], [], {})
 
         doc_term_tf: List[Counter] = []
         df: Counter = Counter()
@@ -118,15 +135,29 @@ class CompanyTfidfIndex:
 
         inverted: Dict[str, List[Tuple[int, float]]] = defaultdict(list)
         doc_norm_sq = [0.0] * n_docs
+        doc_vectors: List[Dict[str, float]] = [{} for _ in range(n_docs)]
 
         for doc_id, tf in enumerate(doc_term_tf):
             for term, cnt in tf.items():
                 w = _tf_weight(cnt) * idf[term]
                 inverted[term].append((doc_id, w))
                 doc_norm_sq[doc_id] += w * w
+                doc_vectors[doc_id][term] = w
 
         doc_norms = [math.sqrt(s) for s in doc_norm_sq]
-        return cls(companies, dict(inverted), idf, doc_norms)
+        symbol_to_doc_id: Dict[str, int] = {}
+        for doc_id, company in enumerate(companies):
+            symbol = (company.get("symbol") or "").strip().upper()
+            if symbol:
+                symbol_to_doc_id[symbol] = doc_id
+        return cls(
+            companies,
+            dict(inverted),
+            idf,
+            doc_norms,
+            doc_vectors,
+            symbol_to_doc_id,
+        )
 
     def search(self, query: str, stopwords: Set[str], top_n: int) -> List[Dict[str, Any]]:
         if top_n <= 0 or not self.companies:
@@ -172,26 +203,96 @@ class CompanyTfidfIndex:
             return []
 
         dot_acc: Dict[int, float] = defaultdict(float)
+        term_contrib_acc: Dict[int, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
         for term, qw in q_weights.items():
             postings = self._inverted.get(term)
             if not postings:
                 continue
             for doc_id, w_td in postings:
-                dot_acc[doc_id] += qw * w_td
+                contrib = qw * w_td
+                dot_acc[doc_id] += contrib
+                term_contrib_acc[doc_id][term] += contrib
 
-        scored: List[Tuple[int, float]] = []
+        scored: List[Tuple[int, float, float, int, int, float, float]] = []
+        sentiment_weight = 0.08
         for doc_id, dot in dot_acc.items():
             dn = self._doc_norms[doc_id]
             if dn == 0:
                 continue
-            cos = dot / (norm_q * dn)
-            if cos > 0:
-                scored.append((doc_id, cos))
+            base_cos = dot / (norm_q * dn)
+            if base_cos <= 0:
+                continue
+            sent, sent_pos, sent_neg = estimate_description_sentiment(
+                self.companies[doc_id], stopwords
+            )
+            final_score = base_cos * (1.0 + sentiment_weight * sent)
+            if final_score > 0:
+                scored.append(
+                    (doc_id, final_score, sent, sent_pos, sent_neg, final_score - base_cos, base_cos)
+                )
 
         scored.sort(key=lambda x: x[1], reverse=True)
         out: List[Dict[str, Any]] = []
-        for doc_id, cos in scored[:top_n]:
-            out.append(_company_to_api_dict(self.companies[doc_id], cos))
+        for doc_id, score, sent, sent_pos, sent_neg, sent_impact, base_cos in scored[:top_n]:
+            term_contribs = term_contrib_acc.get(doc_id, {})
+            top_terms = sorted(
+                term_contribs.items(), key=lambda kv: kv[1], reverse=True
+            )[:5]
+            excluded = set(q_tokens) | set(corrected)
+            related_terms = top_related_terms_from_doc_vector(
+                self._doc_vectors[doc_id], excluded, top_n=5
+            )
+            explanation = build_stock_explanation(
+                self.companies[doc_id],
+                top_terms,
+                related_terms,
+                q_tokens,
+                corrected,
+                sent,
+                sent_pos,
+                sent_neg,
+                sent_impact,
+                base_cos,
+                score,
+            )
+            api_item = _company_to_api_dict(self.companies[doc_id], score, explanation)
+            api_item["sentiment"] = sent
+            out.append(api_item)
+        return out
+
+    def similar_companies(self, ticker: str, top_n: int) -> List[Dict[str, Any]]:
+        if top_n <= 0 or not ticker:
+            return []
+        doc_id = self._symbol_to_doc_id.get(ticker.strip().upper())
+        if doc_id is None:
+            return []
+
+        center_norm = self._doc_norms[doc_id]
+        if center_norm == 0:
+            return []
+
+        dot_acc: Dict[int, float] = defaultdict(float)
+        center_vec = self._doc_vectors[doc_id]
+        for term, w_center in center_vec.items():
+            postings = self._inverted.get(term, [])
+            for other_doc_id, w_other in postings:
+                if other_doc_id == doc_id:
+                    continue
+                dot_acc[other_doc_id] += w_center * w_other
+
+        scored: List[Tuple[int, float]] = []
+        for other_doc_id, dot in dot_acc.items():
+            other_norm = self._doc_norms[other_doc_id]
+            if other_norm == 0:
+                continue
+            cos = dot / (center_norm * other_norm)
+            if cos > 0:
+                scored.append((other_doc_id, cos))
+
+        scored.sort(key=lambda x: x[1], reverse=True)
+        out: List[Dict[str, Any]] = []
+        for other_doc_id, cos in scored[:top_n]:
+            out.append(_company_to_api_dict(self.companies[other_doc_id], cos))
         return out
 
 
