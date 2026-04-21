@@ -183,15 +183,10 @@ function App(): JSX.Element {
         country?: string;
       }>;
 
-      const maxScore =
-        Math.max(
-          ...data.map((d) => (typeof d.score === "number" ? d.score : 0)),
-        ) || 1;
-
       const mapped: Stock[] = data.map((d) => ({
         ticker: d.ticker,
         name: d.name,
-        similarity: (typeof d.score === "number" ? d.score : 0) / maxScore,
+        similarity: typeof d.score === "number" ? d.score : 0,
         sector: d.sector,
         industry: d.industry,
         description: d.description,
@@ -250,14 +245,10 @@ function App(): JSX.Element {
         website?: string;
         explanation?: Stock["explanation"];
       }>;
-      const maxScore =
-        Math.max(
-          ...data.map((d) => (typeof d.score === "number" ? d.score : 0)),
-        ) || 1;
       const mapped: Stock[] = data.map((d) => ({
         ticker: d.ticker,
         name: d.name,
-        similarity: (typeof d.score === "number" ? d.score : 0) / maxScore,
+        similarity: typeof d.score === "number" ? d.score : 0,
         sector: d.sector,
         industry: d.industry,
         description: d.description,
