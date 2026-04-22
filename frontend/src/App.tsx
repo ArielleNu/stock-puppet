@@ -113,6 +113,11 @@ function App(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState<boolean>(false);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const [portfolioMode, setPortfolioMode] = useState<"similar" | "diversify">(
+    "similar",
+  );
+  const [portfolioTickers, setPortfolioTickers] = useState<string[]>([]);
+  const [tickerInput, setTickerInput] = useState("");
   const [peerScopeByTicker, setPeerScopeByTicker] = useState<
     Record<string, PeerScope>
   >({});
@@ -146,32 +151,42 @@ function App(): JSX.Element {
     setHasSearched(true);
     setExpandedIdx(null);
     try {
-      const payload =
-        queryMode === "portfolio"
-          ? { portfolio: parsePortfolioInput(value) }
-          : { query: value };
+      const isPortfolio = queryMode === "portfolio";
+      const tickers = isPortfolio
+        ? portfolioTickers.length > 0
+          ? portfolioTickers
+          : parsePortfolioInput(value)
+        : [];
 
-      if (
-        queryMode === "portfolio" &&
-        (!payload.portfolio || payload.portfolio.length === 0)
-      ) {
+      if (isPortfolio && tickers.length === 0) {
         setStocks([]);
-        setError("Enter at least one ticker or company name.");
+        setError("Add at least one ticker to your portfolio.");
         return;
       }
 
-      // Theme Search and Portfolio Match share backend endpoint.
       const res = await fetch("/api/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: value,
-          preferences: {
-            risk_tolerance: riskTolerance,
-            focus: focus,
-            cap_preference: capPreference,
-          },
-        }),
+        body: JSON.stringify(
+          isPortfolio
+            ? {
+                portfolio: tickers,
+                portfolio_mode: portfolioMode,
+                preferences: {
+                  risk_tolerance: riskTolerance,
+                  focus: focus,
+                  cap_preference: capPreference,
+                },
+              }
+            : {
+                query: value,
+                preferences: {
+                  risk_tolerance: riskTolerance,
+                  focus: focus,
+                  cap_preference: capPreference,
+                },
+              },
+        ),
       });
 
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
@@ -226,7 +241,11 @@ function App(): JSX.Element {
 
   const handleSubmit = (e: React.FormEvent): void => {
     e.preventDefault();
-    handleSearch(searchTerm);
+    if (queryMode === "portfolio" && portfolioTickers.length > 0) {
+      handleSearch(portfolioTickers.join(", "));
+    } else {
+      handleSearch(searchTerm);
+    }
   };
 
   const getSentimentInfo = (score: number) => {
@@ -458,6 +477,82 @@ function App(): JSX.Element {
             Portfolio Match
           </button>
         </div>
+        {queryMode === "portfolio" && (
+          <div className="portfolio-builder">
+            <div className="portfolio-mode-tabs">
+              <button
+                className={`pref-btn ${portfolioMode === "similar" ? "active" : ""}`}
+                onClick={() => setPortfolioMode("similar")}
+              >
+                Find Similar
+              </button>
+              <button
+                className={`pref-btn ${portfolioMode === "diversify" ? "active" : ""}`}
+                onClick={() => setPortfolioMode("diversify")}
+              >
+                Diversify
+              </button>
+            </div>
+
+            <div className="ticker-input-row">
+              <input
+                className="ticker-add-input"
+                placeholder="Add ticker (e.g. NVDA)"
+                value={tickerInput}
+                onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    const t = tickerInput.trim().toUpperCase();
+                    if (t && !portfolioTickers.includes(t)) {
+                      setPortfolioTickers([...portfolioTickers, t]);
+                    }
+                    setTickerInput("");
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="ticker-add-btn"
+                onClick={() => {
+                  const t = tickerInput.trim().toUpperCase();
+                  if (t && !portfolioTickers.includes(t)) {
+                    setPortfolioTickers([...portfolioTickers, t]);
+                  }
+                  setTickerInput("");
+                }}
+              >
+                Add
+              </button>
+            </div>
+
+            {portfolioTickers.length > 0 && (
+              <div className="ticker-chips">
+                {portfolioTickers.map((t) => (
+                  <span key={t} className="ticker-chip">
+                    {t}
+                    <button
+                      className="ticker-chip-x"
+                      onClick={() =>
+                        setPortfolioTickers(
+                          portfolioTickers.filter((x) => x !== t),
+                        )
+                      }
+                    >
+                      &times;
+                    </button>
+                  </span>
+                ))}
+                <button
+                  className="ticker-clear-btn"
+                  onClick={() => setPortfolioTickers([])}
+                >
+                  Clear all
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         <form className="search-form" onSubmit={handleSubmit}>
           <div className="search-input-wrap">

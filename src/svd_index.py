@@ -106,6 +106,99 @@ class CompanySvdIndex:
             if s > 0:
                 out.append(_company_to_api_dict(self.companies[idx], s))
         return out
+    
+    def portfolio_recommend(
+        self, tickers: List[str], top_n: int = 10, mode: str = "similar"
+    ) -> List[Dict[str, Any]]:
+        """
+        Recommend stocks based on a portfolio of tickers.
+        There are two modes users can choose from.
+        mode="similar" finds stocks closest to the portfolio centroid.
+        mode="diversify" finds top stocks from sectors the portfolio
+        does NOT already cover.
+        """
+        if not tickers or len(self.companies) == 0:
+            return []
+
+        ticker_set = {t.upper() for t in tickers}
+        portfolio_indices = []
+        portfolio_sectors = set()
+        for i, c in enumerate(self.companies):
+            sym = (c.get("symbol") or "").upper()
+            if sym in ticker_set:
+                portfolio_indices.append(i)
+                sector = c.get("sector")
+                if sector:
+                    portfolio_sectors.add(sector)
+
+        if not portfolio_indices:
+            return []
+
+        # compute portfolio centroid
+        portfolio_embeddings = self.doc_embeddings[portfolio_indices]
+        centroid = portfolio_embeddings.mean(axis=0)
+        norm = np.linalg.norm(centroid)
+        if norm == 0:
+            return []
+        centroid = centroid / norm
+
+        scores = (self.doc_embeddings @ centroid).flatten()
+
+        if mode == "diversify":
+            candidates = []
+            for i in range(len(self.companies)):
+                sym = (self.companies[i].get("symbol") or "").upper()
+                if sym in ticker_set:
+                    continue
+                sector = self.companies[i].get("sector", "")
+                sim = float(scores[i])
+                if sim > 0:
+                    candidates.append((i, sim, sector))
+
+            candidates.sort(key=lambda x: x[1], reverse=True)
+
+            seen_sectors = set()
+            out = []
+            for idx_c, sim, sector in candidates:
+                if sector in portfolio_sectors:
+                    continue
+                if sector in seen_sectors:
+                    continue
+                seen_sectors.add(sector)
+                diversify_score = 1.0 - sim * 0.5
+                out.append(_company_to_api_dict(self.companies[idx_c], diversify_score))
+                if len(out) >= top_n:
+                    break
+
+            if len(out) < top_n:
+                same_sector = [
+                    (i, s, sec) for i, s, sec in candidates
+                    if sec in portfolio_sectors
+                ]
+                same_sector.sort(key=lambda x: x[1])
+                for idx_c, sim, sector in same_sector:
+                    sym = (self.companies[idx_c].get("symbol") or "").upper()
+                    if sym in ticker_set:
+                        continue
+                    if len(out) >= top_n:
+                        break
+                    diversify_score = 1.0 - sim * 0.5
+                    out.append(_company_to_api_dict(self.companies[idx_c], diversify_score))
+
+            return out
+        else:
+            top_indices = np.argsort(scores)[::-1]
+            out = []
+            for idx_c in top_indices:
+                sym = (self.companies[idx_c].get("symbol") or "").upper()
+                if sym in ticker_set:
+                    continue
+                s = float(scores[idx_c])
+                if s > 0:
+                    out.append(_company_to_api_dict(self.companies[idx_c], s))
+                if len(out) >= top_n:
+                    break
+            return out
 
 
 _svd_cache = None

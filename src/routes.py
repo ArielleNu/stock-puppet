@@ -49,98 +49,23 @@ def json_search(query):
         })
     return matches
 
-def recommend_stocks(portfolio, top_n=5):
+def recommend_stocks(portfolio, top_n=10, mode="similar"):
     """
     Generate stock recommendations based on user's portfolio.
-    
-    Parameters
-    ----------
-    portfolio : list[str]
-        A list of stock tickers provided by the user.
-        Example: ["NVDA", "AMD"]
-        
-    top_n : int
-        Number of recommendations to return.
-        
-    Returns
-    -------
-    list[dict]
-        A list of recommended companies ranked by similarity score.
-        Each result contains company metadata used by the frontend.
 
-    Notes
-    -----
-    - Companies already in the portfolio are excluded from recommendations.
-    - Higher score = more similar to portfolio.
+    portfolio : A list of stock tickers provided by the user.
+    top_n : The number of recommendations to return.
+    mode : str
+        "similar" - find stocks most similar to portfolio.
+        "diversify" - find stocks in different sectors to diversify.
     """
-
-    # handle empty portfolio input
     if not portfolio:
         return []
     
-    raw_inputs = [item.strip() for item in portfolio if item and item.strip()]
-    if not raw_inputs:
-        return []
-    
-    normalized_inputs = list(dict.fromkeys(raw_inputs)) # dedupe
-    portfolio_tickers = set()
-    matched_companies = []
+    portfolio = [ticker.upper().strip() for ticker in portfolio if ticker.strip()]
 
-    for item in normalized_inputs:
-        item_upper = item.upper()
-
-        #try exact ticker match
-        company = Company.query.filter(
-            Company.ticker == item_upper
-        ).first()
-
-        # match by company name
-        if not company:
-            company = Company.query.filter(
-                Company.name.ilike(item)
-            ).first()
-
-        # substring match on company name
-        if not company:
-            company = Company.query.filter(
-                Company.name.ilike(f"%{item}%")
-            ).first()
-
-        if company and company.ticker not in portfolio_tickers:
-            matched_companies.append(company)
-            portfolio_tickers.add(company.ticker)
-
-    if not matched_companies:
-        return []
-    
-    # synthetic query from matched portfolio companies
-
-    query_parts = []
-
-    for company in matched_companies:
-        text = " ".join([
-            company.ticker or "",
-            company.name or "",
-            company.sector or "",
-            company.industry or "",
-            company.description or ""
-        ])
-        query_parts.append(text)
-
-    synthetic_query = " ".join(query_parts).strip()
-    if not synthetic_query:
-        return []
-    
-    # ask for extra results since we will filter portfolio
-    candidates = recommend_from_text_query(synthetic_query, top_n=top_n + len(portfolio_tickers))
-
-    # exclude portfolio companies from returned recommendations
-    filtered = [
-        company for company in candidates 
-        if company.get("ticker", "").upper() not in portfolio_tickers
-    ]
-
-    return filtered[:top_n]
+    index = get_company_svd_index(COMPANY_DATA_PATH, STOPWORDS)
+    return index.portfolio_recommend(portfolio, top_n=top_n, mode=mode)
 
 def recommend_from_text_query(query, top_n=10, method="hybrid"):
     """
@@ -308,6 +233,7 @@ def register_routes(app):
 
         query = data.get("query", "")
         portfolio = data.get("portfolio", [])
+        portfolio_mode = data.get("portfolio_mode", "similar")
         method = data.get("method", "hybrid")
         preferences = data.get("preferences", {})
 
@@ -318,7 +244,7 @@ def register_routes(app):
             return jsonify(results)
         
         if portfolio:
-            results = recommend_stocks(portfolio)
+            results = recommend_stocks(portfolio, mode=portfolio_mode)
             if preferences:
                 results = apply_preferences(results, preferences)
             return jsonify(results)
