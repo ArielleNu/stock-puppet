@@ -1059,13 +1059,7 @@
   animation: shimmer 1.5s infinite linear;
 }
 
-/* llm mode */
-
-.llm-mode .screener {
-  max-height: 70vh;
-  overflow-y: auto;
-  flex-shrink: 0;
-}
+/* ai recommendation mode */
 
 .ai-panel {
   width: 100%;

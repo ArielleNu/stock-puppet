@@ -1,7 +1,7 @@
 """
 Routes: React app serving and episode search API.
 
-To enable AI chat, set USE_LLM = True below. See llm_routes.py for AI code.
+To enable AI suggestions, set USE_LLM = True below. See llm_routes.py for AI code.
 """
 import os
 from flask import send_from_directory, request, jsonify
@@ -11,7 +11,7 @@ from svd_index import get_company_svd_index
 from llm_routes import suggest_query, recommend_from_ir_results
 
 # ── AI toggle ────────────────────────────────────────────────────────────────
-# USE_LLM = False
+#USE_LLM = False
 USE_LLM = True
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -423,7 +423,3 @@ def register_routes(app):
         if not company:
             return jsonify({"error": "Company not found"}), 404
         return jsonify(company.to_dict())
-
-    if USE_LLM:
-        from llm_routes import register_chat_route
-        register_chat_route(app, json_search)

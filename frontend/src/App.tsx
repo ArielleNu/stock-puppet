@@ -8,7 +8,6 @@ import {
   AiQuerySuggestion,
   AiRecommendations,
 } from "./types";
-import Chat from "./Chat";
 
 const TICKER_COLORS: Record<string, string> = {
   AAPL: "#555555",
@@ -1411,8 +1410,6 @@ function App(): JSX.Element {
           </div>
         </div>
       )}
-
-      {useLlm && <Chat onSearchTerm={handleSearch} />}
     </div>
   );
 }
