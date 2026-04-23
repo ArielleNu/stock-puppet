@@ -55,7 +55,6 @@ def json_search(query: str):
         for episode, review in results
     ]
 
-
 def register_routes(app):
     @app.route("/", defaults={"path": ""})
     @app.route("/<path:path>")
@@ -86,13 +85,14 @@ def register_routes(app):
         data = request.get_json() or {}
         query = data.get("query", "")
         portfolio = data.get("portfolio", [])
+        portfolio_mode = data.get("portfolio_mode", "similar")
         method = data.get("method", "hybrid")
         preferences = data.get("preferences", {})
 
         if query:
             results = recommend_from_text_query(query, method=method)
         elif portfolio:
-            results = recommend_stocks(portfolio)
+            results = recommend_stocks(portfolio, mode=portfolio_mode)
         else:
             return jsonify([])
 

@@ -223,7 +223,9 @@ def _synthesize_portfolio_query(companies: List[Company]) -> str:
     return " ".join(parts).strip()
 
 
-def recommend_stocks(portfolio: List[str], top_n: int = 5) -> List[Dict[str, Any]]:
+def recommend_stocks(
+    portfolio: List[str], top_n: int = 5, mode: str = "similar"
+) -> List[Dict[str, Any]]:
     """
     Generate stock recommendations based on a user's portfolio.
 
@@ -233,12 +235,15 @@ def recommend_stocks(portfolio: List[str], top_n: int = 5) -> List[Dict[str, Any
         A list of stock tickers or company names provided by the user.
     top_n : int
         Number of recommendations to return.
+    mode : str
+        "similar"   - rank companies closest to the portfolio.
+        "diversify" - prefer companies in sectors the portfolio doesn't cover.
 
     Returns
     -------
     list[dict]
-        Companies ranked by similarity to the synthetic portfolio query,
-        excluding companies already in the portfolio.
+        Companies ranked by the chosen strategy, excluding companies already
+        in the portfolio.
     """
     if not portfolio:
         return []
@@ -260,6 +265,15 @@ def recommend_stocks(portfolio: List[str], top_n: int = 5) -> List[Dict[str, Any
     if not matched_companies:
         return []
 
+    # Diversify mode uses the SVD index's sector-aware portfolio recommender.
+    if mode == "diversify":
+        svd_index = get_company_svd_index(COMPANY_DATA_PATH, STOPWORDS)
+        tickers = [c.ticker for c in matched_companies if c.ticker]
+        return svd_index.portfolio_recommend(tickers, top_n=top_n, mode="diversify")
+
+    # Default "similar" mode: synthesize a query from the portfolio's
+    # descriptions and run the standard text-query ranking pipeline so the
+    # UI gets full explanations/latent info.
     synthetic_query = _synthesize_portfolio_query(matched_companies)
     if not synthetic_query:
         return []

@@ -27,6 +27,11 @@ function App(): JSX.Element {
   const [error, setError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState<boolean>(false);
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
+  const [portfolioMode, setPortfolioMode] = useState<"similar" | "diversify">(
+    "similar",
+  );
+  const [portfolioTickers, setPortfolioTickers] = useState<string[]>([]);
+  const [tickerInput, setTickerInput] = useState("");
   const [peerScopeByTicker, setPeerScopeByTicker] = useState<
     Record<string, PeerScope>
   >({});
@@ -57,13 +62,20 @@ function App(): JSX.Element {
     };
 
     if (queryMode === "portfolio") {
-      const portfolio = parsePortfolioInput(value);
+      const portfolio =
+        portfolioTickers.length > 0
+          ? portfolioTickers
+          : parsePortfolioInput(value);
       if (portfolio.length === 0) {
         setStocks([]);
-        setError("Enter at least one ticker or company name.");
+        setError("Add at least one ticker to your portfolio.");
         return;
       }
-      const mapped = await fetchRecommend({ portfolio, preferences });
+      const mapped = await fetchRecommend({
+        portfolio,
+        portfolio_mode: portfolioMode,
+        preferences,
+      });
       setStocks(mapped);
       return;
     }
@@ -107,7 +119,11 @@ function App(): JSX.Element {
 
   const handleSubmit = (e: React.FormEvent): void => {
     e.preventDefault();
-    handleSearch(searchTerm);
+    if (queryMode === "portfolio" && portfolioTickers.length > 0) {
+      handleSearch(portfolioTickers.join(", "));
+    } else {
+      handleSearch(searchTerm);
+    }
   };
 
   const handlePeerScopeChange = async (
@@ -177,6 +193,82 @@ function App(): JSX.Element {
             Portfolio Match
           </button>
         </div>
+        {queryMode === "portfolio" && (
+          <div className="portfolio-builder">
+            <div className="portfolio-mode-tabs">
+              <button
+                className={`pref-btn ${portfolioMode === "similar" ? "active" : ""}`}
+                onClick={() => setPortfolioMode("similar")}
+              >
+                Find Similar
+              </button>
+              <button
+                className={`pref-btn ${portfolioMode === "diversify" ? "active" : ""}`}
+                onClick={() => setPortfolioMode("diversify")}
+              >
+                Diversify
+              </button>
+            </div>
+
+            <div className="ticker-input-row">
+              <input
+                className="ticker-add-input"
+                placeholder="Add ticker (e.g. NVDA)"
+                value={tickerInput}
+                onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    const t = tickerInput.trim().toUpperCase();
+                    if (t && !portfolioTickers.includes(t)) {
+                      setPortfolioTickers([...portfolioTickers, t]);
+                    }
+                    setTickerInput("");
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="ticker-add-btn"
+                onClick={() => {
+                  const t = tickerInput.trim().toUpperCase();
+                  if (t && !portfolioTickers.includes(t)) {
+                    setPortfolioTickers([...portfolioTickers, t]);
+                  }
+                  setTickerInput("");
+                }}
+              >
+                Add
+              </button>
+            </div>
+
+            {portfolioTickers.length > 0 && (
+              <div className="ticker-chips">
+                {portfolioTickers.map((t) => (
+                  <span key={t} className="ticker-chip">
+                    {t}
+                    <button
+                      className="ticker-chip-x"
+                      onClick={() =>
+                        setPortfolioTickers(
+                          portfolioTickers.filter((x) => x !== t),
+                        )
+                      }
+                    >
+                      &times;
+                    </button>
+                  </span>
+                ))}
+                <button
+                  className="ticker-clear-btn"
+                  onClick={() => setPortfolioTickers([])}
+                >
+                  Clear all
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {queryMode === "text" && (
           <div className="method-tabs" title="Choose how rankings are computed">
