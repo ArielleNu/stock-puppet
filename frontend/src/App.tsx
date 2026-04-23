@@ -61,8 +61,7 @@ type PeerScope = "result" | "global";
 
 function getSectorColor(sector?: string): string {
   if (!sector) return "#787b86";
-  const hue =
-    [...sector].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % 360;
+  const hue = [...sector].reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % 360;
   return `hsl(${hue}, 62%, 56%)`;
 }
 
@@ -123,6 +122,10 @@ function App(): JSX.Element {
   const [globalPeersLoading, setGlobalPeersLoading] = useState<
     Record<string, boolean>
   >({});
+  const [showPrefs, setShowPrefs] = useState(false);
+  const [riskTolerance, setRiskTolerance] = useState("any");
+  const [focus, setFocus] = useState("any");
+  const [capPreference, setCapPreference] = useState("any");
 
   useEffect(() => {
     fetch("/api/config")
@@ -161,7 +164,14 @@ function App(): JSX.Element {
       const res = await fetch("/api/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          query: value,
+          preferences: {
+            risk_tolerance: riskTolerance,
+            focus: focus,
+            cap_preference: capPreference,
+          },
+        }),
       });
 
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
@@ -295,7 +305,9 @@ function App(): JSX.Element {
         </div>
       </nav>
 
-      <div className={`hero ${hasSearched && stocks.length > 0 ? "hero-compact" : ""}`}>
+      <div
+        className={`hero ${hasSearched && stocks.length > 0 ? "hero-compact" : ""}`}
+      >
         <div className="hero-logo">
           <svg
             className="logo-marionette"
@@ -470,6 +482,86 @@ function App(): JSX.Element {
             )}
           </button>
         </form>
+        <button
+          className="prefs-toggle"
+          onClick={() => setShowPrefs(!showPrefs)}
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M12 3v1m0 16v1m-8-9H3m18 0h-1m-2.636-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707-.707" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+          {showPrefs ? "Hide Preferences" : "Preferences"}
+        </button>
+
+        {showPrefs && (
+          <div className="prefs-panel">
+            <div className="pref-group">
+              <span className="pref-label">Risk Tolerance</span>
+              <div className="pref-options">
+                {["any", "low", "medium", "high"].map((v) => (
+                  <button
+                    key={v}
+                    className={`pref-btn ${riskTolerance === v ? "active" : ""}`}
+                    onClick={() => setRiskTolerance(v)}
+                  >
+                    {v === "any"
+                      ? "Any"
+                      : v === "low"
+                        ? "Low"
+                        : v === "medium"
+                          ? "Medium"
+                          : "High"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="pref-group">
+              <span className="pref-label">Investment Focus</span>
+              <div className="pref-options">
+                {["any", "dividend", "growth"].map((v) => (
+                  <button
+                    key={v}
+                    className={`pref-btn ${focus === v ? "active" : ""}`}
+                    onClick={() => setFocus(v)}
+                  >
+                    {v === "any"
+                      ? "Any"
+                      : v === "dividend"
+                        ? "Dividend"
+                        : "Growth"}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="pref-group">
+              <span className="pref-label">Market Cap</span>
+              <div className="pref-options">
+                {["any", "large", "mid", "small"].map((v) => (
+                  <button
+                    key={v}
+                    className={`pref-btn ${capPreference === v ? "active" : ""}`}
+                    onClick={() => setCapPreference(v)}
+                  >
+                    {v === "any"
+                      ? "Any"
+                      : v === "large"
+                        ? "Large"
+                        : v === "mid"
+                          ? "Mid"
+                          : "Small"}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {loading && (
@@ -553,7 +645,7 @@ function App(): JSX.Element {
                 .slice(0, 6);
               const selectedPeers =
                 peerScope === "global"
-                  ? globalPeersByTicker[stock.ticker] ?? []
+                  ? (globalPeersByTicker[stock.ticker] ?? [])
                   : resultPeers;
               const peerNodes = getPeerNodes(stock, selectedPeers);
               const centerNode = peerNodes[0];
@@ -631,7 +723,9 @@ function App(): JSX.Element {
                         </span>
                         <span
                           className="match-pct"
-                          style={{ color: getMatchColor(stock.similarity * 100) }}
+                          style={{
+                            color: getMatchColor(stock.similarity * 100),
+                          }}
                         >
                           {(stock.similarity * 100).toFixed(0)}%
                         </span>
@@ -715,18 +809,24 @@ function App(): JSX.Element {
                       )}
                       {stock.explanation && (
                         <div className="expanded-explanation">
-                          <span className="expanded-label">Why this was recommended</span>
+                          <span className="expanded-label">
+                            Why this was recommended
+                          </span>
                           {stock.explanation.reasons &&
                             stock.explanation.reasons.length > 0 && (
                               <ul className="expanded-reason-list">
                                 {stock.explanation.reasons
                                   .filter(
                                     (reason) =>
-                                      !reason.toLowerCase().startsWith("evidence:"),
+                                      !reason
+                                        .toLowerCase()
+                                        .startsWith("evidence:"),
                                   )
                                   .slice(0, 3)
                                   .map((reason, idx) => (
-                                    <li key={`${stock.ticker}-reason-${idx}`}>{reason}</li>
+                                    <li key={`${stock.ticker}-reason-${idx}`}>
+                                      {reason}
+                                    </li>
                                   ))}
                               </ul>
                             )}
@@ -748,7 +848,9 @@ function App(): JSX.Element {
                           {stock.explanation.semantic_matches &&
                             stock.explanation.semantic_matches.length > 0 && (
                               <div className="related-terms-row">
-                                <span className="expanded-label">Related terms</span>
+                                <span className="expanded-label">
+                                  Related terms
+                                </span>
                                 <span className="related-terms-text">
                                   {stock.explanation.semantic_matches
                                     .slice(0, 4)
@@ -758,32 +860,47 @@ function App(): JSX.Element {
                             )}
                           {stock.explanation.score_breakdown && (
                             <div className="score-breakdown-card">
-                              <span className="expanded-label">Score Breakdown</span>
+                              <span className="expanded-label">
+                                Score Breakdown
+                              </span>
                               {(() => {
                                 const textScore =
-                                  stock.explanation?.score_breakdown?.text_similarity ?? 0;
+                                  stock.explanation?.score_breakdown
+                                    ?.text_similarity ?? 0;
                                 const sentimentImpact =
-                                  stock.explanation?.score_breakdown?.sentiment_impact ?? 0;
+                                  stock.explanation?.score_breakdown
+                                    ?.sentiment_impact ?? 0;
                                 const finalScore =
-                                  stock.explanation?.score_breakdown?.final_score ?? 0;
+                                  stock.explanation?.score_breakdown
+                                    ?.final_score ?? 0;
                                 const maxVal = Math.max(
                                   0.01,
                                   textScore,
                                   finalScore,
                                   Math.abs(sentimentImpact),
                                 );
-                                const textWidth = clamp01(textScore / maxVal) * 100;
+                                const textWidth =
+                                  clamp01(textScore / maxVal) * 100;
                                 const sentimentWidth =
-                                  clamp01(Math.abs(sentimentImpact) / maxVal) * 100;
-                                const finalWidth = clamp01(finalScore / maxVal) * 100;
+                                  clamp01(Math.abs(sentimentImpact) / maxVal) *
+                                  100;
+                                const finalWidth =
+                                  clamp01(finalScore / maxVal) * 100;
                                 const matchedTerms =
-                                  stock.explanation?.matched_terms?.slice(0, 4) ?? [];
+                                  stock.explanation?.matched_terms?.slice(
+                                    0,
+                                    4,
+                                  ) ?? [];
                                 const relatedDetails =
-                                  stock.explanation?.semantic_match_details?.slice(0, 4) ??
-                                  [];
-                                const queryTerms = stock.explanation?.query_terms ?? [];
-                                const matchedQueryCount = queryTerms.filter((qt) =>
-                                  matchedTerms.some((mt) => mt.term === qt),
+                                  stock.explanation?.semantic_match_details?.slice(
+                                    0,
+                                    4,
+                                  ) ?? [];
+                                const queryTerms =
+                                  stock.explanation?.query_terms ?? [];
+                                const matchedQueryCount = queryTerms.filter(
+                                  (qt) =>
+                                    matchedTerms.some((mt) => mt.term === qt),
                                 ).length;
                                 return (
                                   <div className="score-breakdown-bars">
@@ -808,9 +925,13 @@ function App(): JSX.Element {
                                       <div className="score-breakdown-track">
                                         <span
                                           className={`score-breakdown-fill ${
-                                            sentimentImpact >= 0 ? "positive" : "negative"
+                                            sentimentImpact >= 0
+                                              ? "positive"
+                                              : "negative"
                                           }`}
-                                          style={{ width: `${sentimentWidth}%` }}
+                                          style={{
+                                            width: `${sentimentWidth}%`,
+                                          }}
                                         />
                                       </div>
                                       <span className="score-breakdown-value">
@@ -819,7 +940,9 @@ function App(): JSX.Element {
                                       </span>
                                     </div>
                                     <div className="score-breakdown-row">
-                                      <span className="score-breakdown-name">Final score</span>
+                                      <span className="score-breakdown-name">
+                                        Final score
+                                      </span>
                                       <div className="score-breakdown-track">
                                         <span
                                           className="score-breakdown-fill final"
@@ -842,9 +965,8 @@ function App(): JSX.Element {
                                           </span>
                                         )}
                                         {matchedTerms.map((termObj) => {
-                                          const sharePct = clamp01(
-                                            termObj.share ?? 0,
-                                          ) * 100;
+                                          const sharePct =
+                                            clamp01(termObj.share ?? 0) * 100;
                                           return (
                                             <div
                                               className="score-breakdown-row term"
@@ -856,7 +978,9 @@ function App(): JSX.Element {
                                               <div className="score-breakdown-track">
                                                 <span
                                                   className="score-breakdown-fill term"
-                                                  style={{ width: `${sharePct}%` }}
+                                                  style={{
+                                                    width: `${sharePct}%`,
+                                                  }}
                                                 />
                                               </div>
                                               <span className="score-breakdown-value">
@@ -907,7 +1031,9 @@ function App(): JSX.Element {
                           {stock.explanation.snippets &&
                             stock.explanation.snippets.length > 0 && (
                               <div className="explain-snippets">
-                                <span className="expanded-label">Evidence snippet</span>
+                                <span className="expanded-label">
+                                  Evidence snippet
+                                </span>
                                 <p>{stock.explanation.snippets[0]}</p>
                               </div>
                             )}
@@ -915,7 +1041,9 @@ function App(): JSX.Element {
                       )}
                       <div className="peer-network-card">
                         <div className="peer-network-header">
-                          <span className="expanded-label">Peer Network Graph</span>
+                          <span className="expanded-label">
+                            Peer Network Graph
+                          </span>
                           <div
                             className="peer-scope-tabs"
                             onClick={(e) => e.stopPropagation()}
@@ -955,9 +1083,24 @@ function App(): JSX.Element {
                           role="img"
                           aria-label={`Peer network for ${stock.ticker}`}
                         >
-                          <circle cx="50" cy="50" r="14" className="peer-ring" />
-                          <circle cx="50" cy="50" r="28" className="peer-ring" />
-                          <circle cx="50" cy="50" r="42" className="peer-ring" />
+                          <circle
+                            cx="50"
+                            cy="50"
+                            r="14"
+                            className="peer-ring"
+                          />
+                          <circle
+                            cx="50"
+                            cy="50"
+                            r="28"
+                            className="peer-ring"
+                          />
+                          <circle
+                            cx="50"
+                            cy="50"
+                            r="42"
+                            className="peer-ring"
+                          />
 
                           {centerNode &&
                             peerNodes.slice(1).map((node) => (
@@ -1031,7 +1174,9 @@ function App(): JSX.Element {
                                 <span
                                   className="peer-legend-dot"
                                   style={{
-                                    backgroundColor: getSectorColor(node.sector),
+                                    backgroundColor: getSectorColor(
+                                      node.sector,
+                                    ),
                                   }}
                                 />
                                 {sector}
