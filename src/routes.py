@@ -8,10 +8,11 @@ from flask import send_from_directory, request, jsonify
 from models import db, Episode, Review, Company
 from tfidf_index import get_company_tfidf_index
 from svd_index import get_company_svd_index
+from llm_routes import suggest_query, recommend_from_ir_results
 
 # ── AI toggle ────────────────────────────────────────────────────────────────
-USE_LLM = False
-# USE_LLM = True
+# USE_LLM = False
+USE_LLM = True
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Resolve paths relative to this file so deployments work
@@ -298,11 +299,18 @@ def register_routes(app):
     @app.route("/api/recommend", methods=["POST"])
     def recommend():
         """
-        Baseline recommendation endpoint.
+        Recommendation endpoint.
 
         Supports:
         - text queries like {"query": "AI semicondoctor companies"}
         - portfolio queries like {"portfolio": ["NVDA", "AMD"]}
+
+        Returns:
+        {
+            "results": [...],
+            "ai_query_suggestion": {...},
+            "ai_recommendations": {...}
+        }
         """
         data = request.get_json() or {}
 
@@ -311,25 +319,51 @@ def register_routes(app):
         method = data.get("method", "hybrid")
         preferences = data.get("preferences", {})
 
+        results = []
+        llm_basis_query = ""
+
         if query:
             results = recommend_from_text_query(query, method=method)
-            if preferences:
-                results = apply_preferences(results, preferences)
-            return jsonify(results)
-        
-        if portfolio:
+            llm_basis_query = query
+        elif portfolio:
             results = recommend_stocks(portfolio)
-            if preferences:
-                results = apply_preferences(results, preferences)
-            return jsonify(results)
-
-
-        # TODO: replace placeholder results with ranking based on Company data
-        results = [
+            llm_basis_query = " ".join(portfolio)
+        else:
+            results = [
             {"ticker": "AVGO", "name": "Broadcom"},
             {"ticker": "INTC", "name": "Intel"},
             {"ticker": "QCOM", "name": "Qualcomm"}
         ]
+        
+        if preferences:
+            results = apply_preferences(results, preferences)
+
+        response = {
+            "results": results,
+            "ai_query_suggestion": None,
+            "ai_recommendations": None,
+        }
+
+        if USE_LLM and llm_basis_query and results:
+            try:
+                response["ai_query_suggestion"] = suggest_query(
+                    llm_basis_query, 
+                    results,
+                )
+                response["ai_recommendations"] = recommend_from_ir_results(
+                    llm_basis_query,
+                    results,
+                )
+            except Exception as e:
+                response["ai_query_suggestion"] = {
+                    "suggested_query": llm_basis_query,
+                    "reason": f"LLM unavailable: {str(e)}",
+                }
+                response["ai_recommendations"] = {
+                    "recommended_indices": [],
+                    "summary": "LLM unavailable.",
+                    "reasons": {},
+                }
 
         return jsonify(results)
 
