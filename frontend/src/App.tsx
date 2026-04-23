@@ -157,7 +157,7 @@ function App(): JSX.Element {
         if (rowEl) {
           rowEl.scrollIntoView({
             behavior: "smooth",
-            block: "center",
+            block: "start",
           });
         }
       }, 80);
@@ -537,6 +537,58 @@ function App(): JSX.Element {
             )}
           </button>
         </form>
+        {!loading &&
+          !error &&
+          aiQuerySuggestion?.suggested_query &&
+          aiQuerySuggestion.suggested_query.trim() &&
+          aiQuerySuggestion.suggested_query.trim().toLowerCase() !==
+          searchTerm.trim().toLowerCase() && (
+            <button
+              type="button"
+              className="ai-query-tooltip"
+              onClick={() => {
+                const newQuery = aiQuerySuggestion.suggested_query;
+                setSearchTerm(newQuery);
+                setStocks([]);
+                handleSearch(newQuery);
+              }}
+            >
+              <span className="ai-query-tooltip-badge" aria-hidden="true">
+                <svg
+                  width="30"
+                  height="30"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  className="ai-query-tooltip-sparkle"
+                >
+                  <path
+                    d="M12 4L13.8 9.2L19 11L13.8 12.8L12 18L10.2 12.8L5 11L10.2 9.2L12 4Z"
+                    fill="currentColor"
+                  />
+                  <path
+                    d="M17 3L17.6 5L19.6 5.6L17.6 6.2L17 8.2L16.4 6.2L14.4 5.6L16.4 5L17 3Z"
+                    fill="currentColor"
+                    opacity="0.8"
+                  />
+                </svg>
+              </span>
+
+              <span className="ai-query-tooltip-content">
+                <span className="ai-query-tooltip-text">
+                  <strong className="ai-query-label">Click to try query:</strong>{" "}
+                  <span className="ai-query-value">
+                    “{aiQuerySuggestion.suggested_query}”
+                  </span>
+                </span>
+
+                {aiQuerySuggestion.reason && (
+                  <span className="ai-query-tooltip-reason">
+                    {aiQuerySuggestion.reason}
+                  </span>
+                )}
+              </span>
+            </button>
+          )}
         <button
           className="prefs-toggle"
           onClick={() => setShowPrefs(!showPrefs)}
@@ -674,7 +726,7 @@ function App(): JSX.Element {
         </div>
       )}
 
-      {!loading && !error && aiQuerySuggestion?.suggested_query && (
+      {/* {!loading && !error && aiQuerySuggestion?.suggested_query && (
         <div className="ai-panel">
           <div className="ai-panel-header">
             <span className="ai-panel-title">AI Query Suggestion</span>
@@ -700,7 +752,7 @@ function App(): JSX.Element {
             </button>
           </div>
         </div>
-      )}
+      )} */}
 
       {!loading &&
         !error &&

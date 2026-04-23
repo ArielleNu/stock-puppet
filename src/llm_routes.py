@@ -90,7 +90,7 @@ Return JSON in exactly this format:
 }}
 
 Rules:
-- Keep the suggested query under 12 words.
+- Keep the suggested query under 20 words.
 - Make it more specific and retrieval-friendly.
 - Do not change the user's intent.
 - Do not invent companies that were not implied by the results.
@@ -140,7 +140,7 @@ Return JSON in exactly this format:
 }}
 
 Rules:
-- Chppse 3 to 5 results.
+- Choose 3 results.
 - Only choose from the provided results.
 - Base your reasoning on the descriptions, sectors, industries, and the IR explanation.
 """,
