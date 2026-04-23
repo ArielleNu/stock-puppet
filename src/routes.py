@@ -142,46 +142,81 @@ def recommend_stocks(portfolio, top_n=5):
 
     return filtered[:top_n]
 
-def recommend_from_text_query(query, top_n=10, method="hybrid"):
-    """
-    Returns companies ranked by similarity to the query.
+def _attach_latent_explanation(query, result, tfidf_index, svd_index, score_for_breakdown):
+    """Recompute the explanation for `result` so it includes SVD latent info."""
+    ticker = result.get("ticker")
+    if not ticker:
+        return result
+    latent = svd_index.explain_match(query, ticker, top_k_dims=5)
+    ex = tfidf_index.explain_for_ticker_query(
+        query,
+        STOPWORDS,
+        ticker,
+        score_breakdown_final=score_for_breakdown,
+        latent=latent,
+    )
+    if ex:
+        result["explanation"] = ex
+    elif latent:
+        # No TF-IDF overlap, but we still want to expose the latent reasoning.
+        result["explanation"] = {
+            "short": "latent concept «{}»".format(
+                (latent.get("top_concepts") or ["shared theme"])[0]
+            ),
+            "reasons": [
+                "Pure latent (SVD) match: query and company share semantic dimensions, "
+                "with little or no direct keyword overlap.",
+            ],
+            "matched_terms": [],
+            "snippets": [],
+            "query_terms": [],
+            "semantic_matches": [],
+            "semantic_match_details": [],
+            "feature_matches": {},
+            "score_breakdown": {
+                "text_similarity": 0.0,
+                "sentiment_impact": 0.0,
+                "final_score": round(score_for_breakdown, 6),
+            },
+            "sentiment": {"available": False},
+            "latent": {
+                "top_concepts": latent.get("top_concepts", []),
+                "cosine_similarity": latent.get("cosine_similarity"),
+                "n_components": latent.get("n_components"),
+                "dimensions": [
+                    {
+                        "index": d["index"],
+                        "label": d["label"],
+                        "top_positive": d.get("top_positive", []),
+                        "top_negative": d.get("top_negative", []),
+                        "query_activation": round(float(d.get("query_activation", 0)), 6),
+                        "result_activation": round(float(d.get("result_activation", 0)), 6),
+                        "contribution": round(float(d.get("contribution", 0)), 6),
+                        "abs_share": round(float(d.get("abs_share", 0)), 6),
+                        "alignment": d.get("alignment", "positive"),
+                        "query_drivers": d.get("query_drivers", []),
+                        "result_drivers": d.get("result_drivers", []),
+                    }
+                    for d in latent.get("top_dimensions", [])
+                ],
+            },
+        }
+    return result
 
-    method can be "hybrid" (default), "svd", or "tfidf".
-    Hybrid blends both: combined = 0.6*svd + 0.4*tfidf.
-    """
-    if not query or not query.strip():
-        return []
 
-    q = query.strip()
+def _tfidf_only_ranking(query, top_n):
+    """Pure TF-IDF ranking, no latent info attached (used for the 'Without SVD' view)."""
+    tfidf_index = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
+    return tfidf_index.search(query, STOPWORDS, top_n)
 
-    if method == "tfidf":
-        index = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
-        return index.search(q, STOPWORDS, top_n)
 
-    if method == "svd":
-        index = get_company_svd_index(COMPANY_DATA_PATH, STOPWORDS)
-        results = index.search(q, top_n)
-        if not results:
-            tfidf = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
-            results = tfidf.search(q, STOPWORDS, top_n)
-        else:
-            tfidf = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
-            for row in results:
-                if row.get("explanation"):
-                    continue
-                ex = tfidf.explain_for_ticker_query(
-                    q, STOPWORDS, row["ticker"], score_breakdown_final=row["score"]
-                )
-                if ex:
-                    row["explanation"] = ex
-        return results
-
-    # hybrid: SVD + tfidf
+def _hybrid_ranking(query, top_n):
+    """Hybrid SVD+TFIDF ranking, with latent explanations attached."""
     svd_index = get_company_svd_index(COMPANY_DATA_PATH, STOPWORDS)
     tfidf_index = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
 
-    svd_results = svd_index.search(q, top_n=50)
-    tfidf_results = tfidf_index.search(q, STOPWORDS, top_n=50)
+    svd_results = svd_index.search(query, top_n=50)
+    tfidf_results = tfidf_index.search(query, STOPWORDS, top_n=50)
 
     merged = {}
     for r in svd_results:
@@ -197,16 +232,48 @@ def recommend_from_text_query(query, top_n=10, method="hybrid"):
         combined = SVD_WEIGHT * info["svd"] + TFIDF_WEIGHT * info["tfidf"]
         result = dict(info["data"])
         result["score"] = combined
-        if not result.get("explanation"):
-            ex = tfidf_index.explain_for_ticker_query(
-                q, STOPWORDS, ticker, score_breakdown_final=combined
-            )
-            if ex:
-                result["explanation"] = ex
+        result["component_scores"] = {
+            "svd": round(info["svd"], 6),
+            "tfidf": round(info["tfidf"], 6),
+            "svd_weight": SVD_WEIGHT,
+            "tfidf_weight": TFIDF_WEIGHT,
+        }
+        _attach_latent_explanation(query, result, tfidf_index, svd_index, combined)
         ranked.append(result)
 
     ranked.sort(key=lambda x: x["score"], reverse=True)
     return ranked[:top_n]
+
+
+def recommend_from_text_query(query, top_n=10, method="hybrid"):
+    """
+    Returns companies ranked by similarity to the query.
+
+    method can be "hybrid" (default), "svd", or "tfidf".
+    Hybrid blends both: combined = 0.6*svd + 0.4*tfidf.
+
+    All hybrid/svd results have a `latent` block attached to their explanation
+    so the UI can show which SVD dimensions drove the match.
+    """
+    if not query or not query.strip():
+        return []
+
+    q = query.strip()
+
+    if method == "tfidf":
+        return _tfidf_only_ranking(q, top_n)
+
+    if method == "svd":
+        svd_index = get_company_svd_index(COMPANY_DATA_PATH, STOPWORDS)
+        tfidf_index = get_company_tfidf_index(COMPANY_DATA_PATH, STOPWORDS)
+        results = svd_index.search(q, top_n)
+        if not results:
+            return _tfidf_only_ranking(q, top_n)
+        for row in results:
+            _attach_latent_explanation(q, row, tfidf_index, svd_index, row["score"])
+        return results
+
+    return _hybrid_ranking(q, top_n)
 
 def apply_preferences(results, preferences):
     """
@@ -303,6 +370,7 @@ def register_routes(app):
         Supports:
         - text queries like {"query": "AI semicondoctor companies"}
         - portfolio queries like {"portfolio": ["NVDA", "AMD"]}
+        - method = "hybrid" (default) | "svd" | "tfidf"
         """
         data = request.get_json() or {}
 
@@ -332,6 +400,86 @@ def register_routes(app):
         ]
 
         return jsonify(results)
+
+    @app.route("/api/recommend/compare", methods=["POST"])
+    def recommend_compare():
+        """
+        Run the same query through both pipelines and return a side-by-side
+        ranking comparison.  Used by the UI's "With SVD vs Without SVD" toggle
+        to make the impact of the SVD layer concrete.
+        """
+        data = request.get_json() or {}
+        query = (data.get("query") or "").strip()
+        try:
+            top_n = int(data.get("top_n") or 10)
+        except Exception:
+            top_n = 10
+        top_n = max(1, min(top_n, 25))
+
+        if not query:
+            return jsonify({"query": "", "with_svd": [], "without_svd": [], "diff": []})
+
+        with_svd = recommend_from_text_query(query, top_n=top_n, method="hybrid")
+        without_svd = recommend_from_text_query(query, top_n=top_n, method="tfidf")
+
+        rank_tfidf = {r["ticker"]: i + 1 for i, r in enumerate(without_svd)}
+        rank_hybrid = {r["ticker"]: i + 1 for i, r in enumerate(with_svd)}
+
+        diff = []
+        for ticker, hybrid_rank in rank_hybrid.items():
+            tfidf_rank = rank_tfidf.get(ticker)
+            entry = {
+                "ticker": ticker,
+                "rank_with_svd": hybrid_rank,
+                "rank_without_svd": tfidf_rank,
+            }
+            if tfidf_rank is None:
+                entry["status"] = "new"
+                entry["delta"] = None
+            else:
+                entry["status"] = "moved" if tfidf_rank != hybrid_rank else "same"
+                # Positive delta = moved up (better) thanks to SVD.
+                entry["delta"] = tfidf_rank - hybrid_rank
+            diff.append(entry)
+        for ticker, tfidf_rank in rank_tfidf.items():
+            if ticker not in rank_hybrid:
+                diff.append({
+                    "ticker": ticker,
+                    "rank_with_svd": None,
+                    "rank_without_svd": tfidf_rank,
+                    "status": "dropped",
+                    "delta": None,
+                })
+
+        diff.sort(
+            key=lambda e: (
+                0 if e["rank_with_svd"] is not None else 1,
+                e["rank_with_svd"] or e["rank_without_svd"] or 999,
+            )
+        )
+
+        return jsonify({
+            "query": query,
+            "with_svd": with_svd,
+            "without_svd": without_svd,
+            "diff": diff,
+        })
+
+    @app.route("/api/svd/dimensions")
+    def svd_dimensions():
+        """Catalog of every latent SVD dimension and its top defining terms."""
+        try:
+            limit = int(request.args.get("limit") or "0")
+        except Exception:
+            limit = 0
+        index = get_company_svd_index(COMPANY_DATA_PATH, STOPWORDS)
+        dims = index.list_dimensions(top_k_terms=6)
+        if limit > 0:
+            dims = dims[:limit]
+        return jsonify({
+            "n_components": index.n_components,
+            "dimensions": dims,
+        })
 
     @app.route("/api/peers/<ticker>")
     def global_peers(ticker: str):

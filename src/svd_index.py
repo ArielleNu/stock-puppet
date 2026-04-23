@@ -5,18 +5,47 @@ Takes the same company JSON as tfidf_index.py but compresses the TF-IDF
 matrix with Truncated SVD.  This captures latent topic structure so that
 queries like "electric vehicles" can match companies whose descriptions say
 "EV maker" even without exact token overlap.
+
+This module also exposes helpers to *introspect* the latent dimensions so the
+UI can show users why a company matched: which latent concepts are shared,
+how strongly the query and the company activate each concept, and which
+words define each concept.
 """
 from __future__ import annotations
 
 import json
-import math
 import os
-from typing import Any, Dict, List, Optional, Set, Tuple
+import re
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.decomposition import TruncatedSVD
 from sklearn.preprocessing import normalize
+
+
+_DIM_LABEL_STOPWORDS = {
+    # entity suffixes
+    "inc", "corp", "corporation", "company", "companies", "co", "ltd", "llc",
+    "plc", "group", "holding", "holdings", "international", "global",
+    # generic verbs / connectors common in 10-K boilerplate
+    "the", "and", "for", "with", "from", "into", "that", "this", "their",
+    "its", "they", "have", "has", "had", "are", "was", "were", "been",
+    "being", "use", "used", "using", "make", "makes", "made", "include",
+    "includes", "including", "various", "well", "also", "such", "provides",
+    "provider", "providers", "products", "product", "services", "service",
+    "offers", "offering", "operates", "subsidiary", "subsidiaries", "segment",
+    "segments", "operating", "primarily", "located", "headquartered",
+    "principally", "additionally", "engages", "engage", "engaged",
+    "approximately", "manufactures", "manufacturing", "designs", "designed",
+    "develops", "developed", "development", "based", "business", "businesses",
+    "customers", "customer", "market", "markets", "marketing", "industry",
+    "industries", "solutions", "solution", "platform", "platforms",
+    "technology", "technologies", "system", "systems", "applications",
+    "application", "support", "related", "across",
+    # common date / number-ish noise
+    "year", "years", "period", "quarter",
+}
 
 
 def _company_to_doc_text(company: Dict[str, Any]) -> str:
@@ -51,19 +80,62 @@ def _company_to_api_dict(company: Dict[str, Any], score: float) -> Dict[str, Any
     }
 
 
+def _humanize_label(top_terms: List[str]) -> str:
+    """Turn the top distinctive terms of a dimension into a short readable label."""
+    cleaned: List[str] = []
+    for t in top_terms:
+        t = t.strip()
+        if not t or t.lower() in _DIM_LABEL_STOPWORDS:
+            continue
+        if t.isdigit():
+            continue
+        # Avoid 1-2 character noise tokens.
+        if len(t) <= 2:
+            continue
+        cleaned.append(t)
+        if len(cleaned) >= 3:
+            break
+    if not cleaned:
+        return "general theme"
+    return " · ".join(cleaned)
+
+
 class CompanySvdIndex:
-    def __init__(self, companies, doc_embeddings, vectorizer, svd):
+    def __init__(
+        self,
+        companies: List[Dict[str, Any]],
+        doc_embeddings_unit: np.ndarray,
+        doc_embeddings_raw: np.ndarray,
+        vectorizer: TfidfVectorizer,
+        svd: TruncatedSVD,
+    ) -> None:
         self.companies = companies
-        self.doc_embeddings = doc_embeddings
+        self.doc_embeddings = doc_embeddings_unit
+        self._doc_embeddings_raw = doc_embeddings_raw
         self._vectorizer = vectorizer
         self._svd = svd
+
+        self._feature_names: List[str] = (
+            list(vectorizer.get_feature_names_out())
+            if companies
+            else []
+        )
+        self._symbol_to_doc_id: Dict[str, int] = {}
+        for i, c in enumerate(companies):
+            sym = (c.get("symbol") or "").strip().upper()
+            if sym:
+                self._symbol_to_doc_id[sym] = i
+
+        # Cache of per-dimension term info (top positive / negative loadings).
+        self._dim_info_cache: Dict[int, Dict[str, Any]] = {}
 
     @classmethod
     def build(cls, companies, stopwords, n_components=100):
         if not companies:
             empty_vec = TfidfVectorizer()
             empty_svd = TruncatedSVD(n_components=2)
-            return cls([], np.empty((0, 0)), empty_vec, empty_svd)
+            empty = np.empty((0, 0))
+            return cls([], empty, empty, empty_vec, empty_svd)
 
         docs = [_company_to_doc_text(c) for c in companies]
 
@@ -75,13 +147,230 @@ class CompanySvdIndex:
         )
         tfidf_matrix = vectorizer.fit_transform(docs)
 
-        n_components = min(n_components, tfidf_matrix.shape[0] - 1, tfidf_matrix.shape[1] - 1)
+        n_components = min(
+            n_components,
+            tfidf_matrix.shape[0] - 1,
+            tfidf_matrix.shape[1] - 1,
+        )
 
         svd = TruncatedSVD(n_components=n_components, random_state=42)
-        doc_embeddings = svd.fit_transform(tfidf_matrix)
-        doc_embeddings = normalize(doc_embeddings, norm="l2")
+        doc_embeddings_raw = svd.fit_transform(tfidf_matrix)
+        doc_embeddings_unit = normalize(doc_embeddings_raw, norm="l2")
 
-        return cls(companies, doc_embeddings, vectorizer, svd)
+        return cls(
+            companies,
+            doc_embeddings_unit,
+            doc_embeddings_raw,
+            vectorizer,
+            svd,
+        )
+
+    # ------------------------------------------------------------------ #
+    # Latent-dimension introspection                                     #
+    # ------------------------------------------------------------------ #
+
+    @property
+    def n_components(self) -> int:
+        return int(getattr(self._svd, "n_components", 0) or 0)
+
+    def get_dimension_info(self, dim_idx: int, top_k_terms: int = 6) -> Dict[str, Any]:
+        """Return the top positive/negative loading terms for a latent dimension."""
+        if dim_idx in self._dim_info_cache:
+            cached = self._dim_info_cache[dim_idx]
+            if (
+                len(cached.get("top_positive", [])) >= top_k_terms
+                and len(cached.get("top_negative", [])) >= top_k_terms
+            ):
+                return cached
+
+        if not self._feature_names:
+            info = {
+                "index": dim_idx,
+                "label": "general theme",
+                "top_positive": [],
+                "top_negative": [],
+                "explained_variance_ratio": 0.0,
+            }
+            self._dim_info_cache[dim_idx] = info
+            return info
+
+        comp = self._svd.components_[dim_idx]
+        order = np.argsort(comp)
+        neg_idx = order[:top_k_terms]
+        pos_idx = order[-top_k_terms:][::-1]
+
+        top_positive = [
+            {"term": self._feature_names[i], "weight": float(comp[i])}
+            for i in pos_idx
+        ]
+        top_negative = [
+            {"term": self._feature_names[i], "weight": float(comp[i])}
+            for i in neg_idx
+        ]
+        label = _humanize_label([t["term"] for t in top_positive])
+
+        ev = (
+            float(self._svd.explained_variance_ratio_[dim_idx])
+            if hasattr(self._svd, "explained_variance_ratio_")
+            and dim_idx < len(self._svd.explained_variance_ratio_)
+            else 0.0
+        )
+
+        info = {
+            "index": int(dim_idx),
+            "label": label,
+            "top_positive": top_positive,
+            "top_negative": top_negative,
+            "explained_variance_ratio": ev,
+        }
+        self._dim_info_cache[dim_idx] = info
+        return info
+
+    def list_dimensions(self, top_k_terms: int = 5) -> List[Dict[str, Any]]:
+        """Catalog of every latent dimension with its readable label."""
+        return [
+            self.get_dimension_info(d, top_k_terms=top_k_terms)
+            for d in range(self.n_components)
+        ]
+
+    def _embed_query(self, query: str) -> Optional[Tuple[np.ndarray, np.ndarray, float]]:
+        """Return (raw_embed, unit_embed, raw_norm) for a query string."""
+        if not query or not query.strip():
+            return None
+        if not self.companies:
+            return None
+        q_tfidf = self._vectorizer.transform([query])
+        if q_tfidf.nnz == 0:
+            return None
+        raw = self._svd.transform(q_tfidf).flatten()
+        norm = float(np.linalg.norm(raw))
+        if norm == 0:
+            return None
+        unit = raw / norm
+        return raw, unit, norm
+
+    def _query_term_loadings(self, query: str, dim_idx: int, top_k: int = 3) -> List[Dict[str, Any]]:
+        """Which words *in the query* drive the projection onto `dim_idx`?"""
+        if not self._feature_names:
+            return []
+        q_tfidf = self._vectorizer.transform([query])
+        if q_tfidf.nnz == 0:
+            return []
+        comp = self._svd.components_[dim_idx]
+        # Per-token contribution to dim's projection = tfidf_weight * loading
+        contribs: List[Tuple[str, float]] = []
+        rows, cols = q_tfidf.nonzero()
+        for col in cols:
+            term = self._feature_names[col]
+            weight = float(q_tfidf[0, col])
+            contribs.append((term, weight * float(comp[col])))
+        contribs.sort(key=lambda kv: abs(kv[1]), reverse=True)
+        return [
+            {"term": t, "contribution": float(c)}
+            for t, c in contribs[:top_k]
+            if abs(c) > 1e-9
+        ]
+
+    def _doc_term_loadings(
+        self, doc_id: int, dim_idx: int, top_k: int = 3
+    ) -> List[Dict[str, Any]]:
+        """Which words *in the company's text* drive its loading on `dim_idx`?"""
+        if not self._feature_names:
+            return []
+        # Re-vectorize the doc (cheap; doc count is small).
+        doc_text = _company_to_doc_text(self.companies[doc_id])
+        d_tfidf = self._vectorizer.transform([doc_text])
+        if d_tfidf.nnz == 0:
+            return []
+        comp = self._svd.components_[dim_idx]
+        contribs: List[Tuple[str, float]] = []
+        _rows, cols = d_tfidf.nonzero()
+        for col in cols:
+            term = self._feature_names[col]
+            weight = float(d_tfidf[0, col])
+            contribs.append((term, weight * float(comp[col])))
+        contribs.sort(key=lambda kv: abs(kv[1]), reverse=True)
+        return [
+            {"term": t, "contribution": float(c)}
+            for t, c in contribs[:top_k]
+            if abs(c) > 1e-9
+        ]
+
+    def explain_match(
+        self,
+        query: str,
+        ticker: str,
+        top_k_dims: int = 5,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Explain a single (query, company) match in *latent space*.
+
+        Returns the top contributing SVD dimensions: each one comes with a
+        human-readable label, its top defining terms, the query's activation,
+        the company's activation and the resulting contribution to the cosine
+        similarity (between the L2-normalized query and document embeddings).
+        """
+        sym = (ticker or "").strip().upper()
+        doc_id = self._symbol_to_doc_id.get(sym)
+        if doc_id is None:
+            return None
+
+        embed = self._embed_query(query)
+        if embed is None:
+            return None
+        _q_raw, q_unit, _q_norm = embed
+
+        doc_unit = self.doc_embeddings[doc_id]
+        if doc_unit.size == 0:
+            return None
+
+        contributions = q_unit * doc_unit  # element-wise; sums to cosine sim
+        cosine_sim = float(contributions.sum())
+
+        order = np.argsort(np.abs(contributions))[::-1][:top_k_dims]
+        total_abs = float(np.abs(contributions).sum()) or 1.0
+
+        dims_payload: List[Dict[str, Any]] = []
+        positive_dims: List[Dict[str, Any]] = []
+        for k in order:
+            k_int = int(k)
+            info = self.get_dimension_info(k_int, top_k_terms=5)
+            contrib = float(contributions[k])
+            entry = {
+                "index": k_int,
+                "label": info["label"],
+                "top_positive": info["top_positive"][:5],
+                "top_negative": info["top_negative"][:3],
+                "query_activation": float(q_unit[k]),
+                "result_activation": float(doc_unit[k]),
+                "contribution": contrib,
+                "abs_share": abs(contrib) / total_abs,
+                "alignment": "positive" if contrib >= 0 else "opposing",
+                "query_drivers": self._query_term_loadings(query, k_int, top_k=3),
+                "result_drivers": self._doc_term_loadings(doc_id, k_int, top_k=3),
+            }
+            dims_payload.append(entry)
+            if contrib > 0:
+                positive_dims.append(entry)
+
+        # Build a short, human readable summary using the strongest *shared*
+        # (positive) dimensions.  These are the latent themes the query and
+        # the company both activate – this is what we surface as "matched on
+        # concept X".
+        top_concepts = [d["label"] for d in positive_dims[:2]] or [
+            dims_payload[0]["label"] if dims_payload else "shared theme"
+        ]
+
+        return {
+            "cosine_similarity": cosine_sim,
+            "top_dimensions": dims_payload,
+            "top_concepts": top_concepts,
+            "n_components": self.n_components,
+        }
+
+    # ------------------------------------------------------------------ #
+    # Search                                                             #
+    # ------------------------------------------------------------------ #
 
     def search(self, query, top_n=10):
         if top_n <= 0 or len(self.companies) == 0:
@@ -89,15 +378,12 @@ class CompanySvdIndex:
         if not query or not query.strip():
             return []
 
-        q_tfidf = self._vectorizer.transform([query])
-        q_embed = self._svd.transform(q_tfidf)
-
-        norm = np.linalg.norm(q_embed)
-        if norm == 0:
+        embed = self._embed_query(query)
+        if embed is None:
             return []
-        q_embed = q_embed / norm
+        _q_raw, q_unit, _q_norm = embed
 
-        scores = (self.doc_embeddings @ q_embed.T).flatten()
+        scores = (self.doc_embeddings @ q_unit.T).flatten()
         top_indices = np.argsort(scores)[::-1][:top_n]
 
         out = []

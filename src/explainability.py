@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 _TOKEN_RE = re.compile(r"[a-zA-Z0-9]+")
 _POSITIVE_TOKENS = {
@@ -118,6 +118,7 @@ def build_stock_explanation(
     sentiment_impact: float,
     base_score: float,
     final_score: float,
+    latent: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     total_contrib = sum(contrib for _, contrib in top_terms) or 1.0
     matched_terms = []
@@ -143,16 +144,46 @@ def build_stock_explanation(
     q_terms_unique = list(dict.fromkeys(corrected_query_terms))
     matched_q_terms = [t for t in q_terms_unique if any(mt["term"] == t for mt in matched_terms)]
 
+    # ---- Latent (SVD) concept reasoning -------------------------------
+    latent_dims = []
+    latent_top_concepts: List[str] = []
+    if latent and latent.get("top_dimensions"):
+        latent_dims = latent.get("top_dimensions") or []
+        latent_top_concepts = latent.get("top_concepts") or []
+        if latent_top_concepts:
+            concept_text = ", ".join(latent_top_concepts[:2])
+            reason_bits.append(
+                f"Shared latent concept: {concept_text} "
+                "(query and company both load on this SVD dimension)"
+            )
+        # Add a second reason describing the strongest dimension's activations.
+        positive_dims = [d for d in latent_dims if d.get("contribution", 0) > 0]
+        if positive_dims:
+            top = positive_dims[0]
+            reason_bits.append(
+                "Strongest latent match on dim #{idx} – {label} "
+                "(query strength {q:+.2f}, company strength {r:+.2f}, "
+                "contributes {pct:.0f}% of similarity)".format(
+                    idx=top["index"],
+                    label=top["label"],
+                    q=top["query_activation"],
+                    r=top["result_activation"],
+                    pct=top.get("abs_share", 0) * 100,
+                )
+            )
+
     if matched_terms:
         top_term_text = ", ".join(
             f"{t['term']} ({int(round(float(t['share']) * 100))}%)"
             for t in matched_terms[:3]
         )
         if matched_q_terms:
-            reason_bits.append(f"Keyword match: {top_term_text}")
+            reason_bits.append(f"Keyword overlap with query: {top_term_text}")
         else:
-            reason_bits.append(f"Closest TF-IDF concepts: {top_term_text}")
-    else:
+            reason_bits.append(
+                f"Closest TF-IDF terms in company text: {top_term_text}"
+            )
+    elif not latent_dims:
         reason_bits.append("General text similarity match")
 
     sector = (company.get("sector") or "").strip()
@@ -191,13 +222,39 @@ def build_stock_explanation(
 
     snippets = _description_match_snippets(company, [t["term"] for t in matched_terms[:3]])
     short_bits = []
-    if matched_q_terms:
+    if latent_top_concepts:
+        short_bits.append(f"latent concept «{latent_top_concepts[0]}»")
+    elif matched_q_terms:
         short_bits.append(f"matched on {', '.join(matched_q_terms[:2])}")
     elif matched_terms:
         short_bits.append(f"matched concepts {', '.join(t['term'] for t in matched_terms[:2])}")
     short_bits.append(market_cap_bucket.lower())
     short_bits.append(f"{sentiment_label} sentiment")
     short = " + ".join(short_bits[:3])
+
+    latent_payload: Optional[Dict[str, Any]] = None
+    if latent_dims:
+        latent_payload = {
+            "top_concepts": latent_top_concepts,
+            "cosine_similarity": latent.get("cosine_similarity") if latent else None,
+            "n_components": latent.get("n_components") if latent else None,
+            "dimensions": [
+                {
+                    "index": d["index"],
+                    "label": d["label"],
+                    "top_positive": d.get("top_positive", []),
+                    "top_negative": d.get("top_negative", []),
+                    "query_activation": round(float(d.get("query_activation", 0)), 6),
+                    "result_activation": round(float(d.get("result_activation", 0)), 6),
+                    "contribution": round(float(d.get("contribution", 0)), 6),
+                    "abs_share": round(float(d.get("abs_share", 0)), 6),
+                    "alignment": d.get("alignment", "positive"),
+                    "query_drivers": d.get("query_drivers", []),
+                    "result_drivers": d.get("result_drivers", []),
+                }
+                for d in latent_dims
+            ],
+        }
 
     return {
         "short": short,
@@ -225,4 +282,5 @@ def build_stock_explanation(
             "negative_cues": sentiment_neg_count,
             "note": "Sentiment is estimated from company description language.",
         },
+        "latent": latent_payload,
     }

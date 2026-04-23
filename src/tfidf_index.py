@@ -213,6 +213,7 @@ class CompanyTfidfIndex:
         ticker: str,
         *,
         score_breakdown_final: Optional[float] = None,
+        latent: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Build TF-IDF-based explainability for one company vs a text query.
@@ -278,6 +279,7 @@ class CompanyTfidfIndex:
             sent_impact,
             base_cos,
             final_for_explanation,
+            latent=latent,
         )
 
         if base_cos < 1e-9 and score_breakdown_final is not None and score_breakdown_final > 0.05:

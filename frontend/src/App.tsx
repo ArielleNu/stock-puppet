@@ -1,8 +1,16 @@
 import { useState, useEffect } from "react";
 import "./App.css";
 import SearchIcon from "./assets/mag.png";
-import { Stock, QueryMode } from "./types";
+import {
+  Stock,
+  QueryMode,
+  CompareDiffEntry,
+  CompareResponse,
+  LatentDimension,
+} from "./types";
 import Chat from "./Chat";
+
+type SearchMethod = "hybrid" | "tfidf" | "compare";
 
 const TICKER_COLORS: Record<string, string> = {
   AAPL: "#555555",
@@ -104,6 +112,295 @@ function parsePortfolioInput(value: string): string[] {
     .filter(Boolean);
 }
 
+function LatentDimensionPanel({
+  latent,
+  tickerKey,
+  componentScores,
+}: {
+  latent: NonNullable<Stock["explanation"]>["latent"];
+  tickerKey: string;
+  componentScores?: Stock["component_scores"];
+}): JSX.Element | null {
+  if (!latent || !latent.dimensions || latent.dimensions.length === 0) {
+    return null;
+  }
+
+  const positive = latent.dimensions.filter((d) => d.contribution > 0);
+  const dims =
+    positive.length > 0 ? positive.slice(0, 4) : latent.dimensions.slice(0, 4);
+
+  return (
+    <div className="latent-card">
+      <div className="latent-header">
+        <span className="expanded-label">Latent dimensions (SVD)</span>
+        <span className="latent-meta">
+          {latent.n_components ? `${latent.n_components} concepts` : ""}
+          {typeof latent.cosine_similarity === "number"
+            ? ` · embedding cos = ${latent.cosine_similarity.toFixed(3)}`
+            : ""}
+        </span>
+      </div>
+
+      <p className="latent-help">
+        Each row is a latent concept the SVD model learned from company
+        descriptions. The bars show how strongly your <em>query</em> and the{" "}
+        <em>company</em> activate that concept; together they explain the
+        semantic match.
+      </p>
+
+      {latent.top_concepts && latent.top_concepts.length > 0 && (
+        <div className="latent-concept-chips">
+          {latent.top_concepts.slice(0, 3).map((c, i) => (
+            <span
+              key={`${tickerKey}-concept-${i}`}
+              className="latent-concept-chip"
+              title="Top shared latent concept"
+            >
+              {c}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {componentScores &&
+        (componentScores.svd !== undefined ||
+          componentScores.tfidf !== undefined) && (
+          <div className="latent-composition">
+            <span className="latent-composition-label">
+              Hybrid score = {componentScores.svd_weight ?? 0.6} × SVD (
+              {(componentScores.svd ?? 0).toFixed(3)}) +{" "}
+              {componentScores.tfidf_weight ?? 0.4} × TF‑IDF (
+              {(componentScores.tfidf ?? 0).toFixed(3)})
+            </span>
+          </div>
+        )}
+
+      <div className="latent-dim-list">
+        {dims.map((d) => (
+          <LatentDimensionRow
+            key={`${tickerKey}-dim-${d.index}`}
+            dim={d}
+            tickerKey={tickerKey}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LatentDimensionRow({
+  dim,
+  tickerKey,
+}: {
+  dim: LatentDimension;
+  tickerKey: string;
+}): JSX.Element {
+  // Map activation in approximately [-1, 1] to a width 0..50% on each side.
+  const qPct = Math.min(50, Math.abs(dim.query_activation) * 50);
+  const rPct = Math.min(50, Math.abs(dim.result_activation) * 50);
+  const qSign = dim.query_activation >= 0 ? "pos" : "neg";
+  const rSign = dim.result_activation >= 0 ? "pos" : "neg";
+  const sharePct = Math.min(100, Math.max(0, dim.abs_share * 100));
+  const topPosWords = dim.top_positive
+    .slice(0, 4)
+    .map((t) => t.term)
+    .join(", ");
+  const topNegWords = dim.top_negative
+    .slice(0, 3)
+    .map((t) => t.term)
+    .join(", ");
+
+  return (
+    <div className={`latent-dim-row ${dim.alignment}`}>
+      <div className="latent-dim-row-head">
+        <span className="latent-dim-name">
+          <span className="latent-dim-index">#{dim.index}</span>
+          <span className="latent-dim-label">{dim.label}</span>
+        </span>
+        <span className="latent-dim-share" title="Share of |contribution|">
+          {sharePct.toFixed(0)}%
+        </span>
+      </div>
+
+      <div className="latent-activation-row">
+        <span className="latent-side-label">Query</span>
+        <div className="latent-bipolar-track">
+          <span
+            className={`latent-bipolar-fill ${qSign}`}
+            style={{
+              width: `${qPct}%`,
+              [qSign === "pos" ? "left" : "right"]: "50%",
+            } as React.CSSProperties}
+          />
+          <span className="latent-bipolar-axis" />
+        </div>
+        <span className="latent-activation-value">
+          {dim.query_activation >= 0 ? "+" : ""}
+          {dim.query_activation.toFixed(2)}
+        </span>
+      </div>
+      <div className="latent-activation-row">
+        <span className="latent-side-label">Result</span>
+        <div className="latent-bipolar-track">
+          <span
+            className={`latent-bipolar-fill ${rSign}`}
+            style={{
+              width: `${rPct}%`,
+              [rSign === "pos" ? "left" : "right"]: "50%",
+            } as React.CSSProperties}
+          />
+          <span className="latent-bipolar-axis" />
+        </div>
+        <span className="latent-activation-value">
+          {dim.result_activation >= 0 ? "+" : ""}
+          {dim.result_activation.toFixed(2)}
+        </span>
+      </div>
+
+      <div className="latent-driver-grid">
+        <div className="latent-driver-col">
+          <span className="latent-driver-label">
+            Defines this concept (loading words)
+          </span>
+          <span className="latent-driver-text">
+            <span className="latent-driver-pos">+ {topPosWords || "—"}</span>
+            {topNegWords && (
+              <span className="latent-driver-neg"> · − {topNegWords}</span>
+            )}
+          </span>
+        </div>
+        {dim.query_drivers && dim.query_drivers.length > 0 && (
+          <div className="latent-driver-col">
+            <span className="latent-driver-label">
+              Your query activates it through
+            </span>
+            <span className="latent-driver-text">
+              {dim.query_drivers.map((q, i) => (
+                <span
+                  key={`${tickerKey}-qd-${dim.index}-${i}`}
+                  className={`latent-driver-chip ${(q.contribution ?? 0) >= 0 ? "pos" : "neg"}`}
+                  title={`contribution ${(q.contribution ?? 0).toFixed(3)}`}
+                >
+                  {q.term}
+                </span>
+              ))}
+            </span>
+          </div>
+        )}
+        {dim.result_drivers && dim.result_drivers.length > 0 && (
+          <div className="latent-driver-col">
+            <span className="latent-driver-label">
+              Company expresses it through
+            </span>
+            <span className="latent-driver-text">
+              {dim.result_drivers.map((r, i) => (
+                <span
+                  key={`${tickerKey}-rd-${dim.index}-${i}`}
+                  className={`latent-driver-chip ${(r.contribution ?? 0) >= 0 ? "pos" : "neg"}`}
+                  title={`contribution ${(r.contribution ?? 0).toFixed(3)}`}
+                >
+                  {r.term}
+                </span>
+              ))}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RankBadge({ entry }: { entry: CompareDiffEntry }): JSX.Element | null {
+  if (entry.status === "new") {
+    return (
+      <span className="rank-badge new" title="Surfaced only by SVD ranking">
+        new via SVD
+      </span>
+    );
+  }
+  if (entry.status === "dropped") {
+    return (
+      <span className="rank-badge dropped" title="Dropped from top results when SVD is applied">
+        dropped
+      </span>
+    );
+  }
+  if (entry.delta === null || entry.delta === 0) {
+    return (
+      <span className="rank-badge same" title="Same rank with and without SVD">
+        same rank
+      </span>
+    );
+  }
+  const up = entry.delta > 0;
+  return (
+    <span
+      className={`rank-badge ${up ? "up" : "down"}`}
+      title={`Rank without SVD: #${entry.rank_without_svd ?? "?"} → with SVD: #${entry.rank_with_svd ?? "?"}`}
+    >
+      {up ? "▲" : "▼"} {Math.abs(entry.delta)} {up ? "via SVD" : "without SVD"}
+    </span>
+  );
+}
+
+function CompareSummary({ data }: { data: CompareResponse }): JSX.Element {
+  const moved = data.diff.filter(
+    (d) => d.status === "moved" && d.delta !== null,
+  );
+  const newOnly = data.diff.filter((d) => d.status === "new");
+  const dropped = data.diff.filter((d) => d.status === "dropped");
+  const sameCount = data.diff.filter((d) => d.status === "same").length;
+
+  return (
+    <div className="compare-card">
+      <div className="compare-header">
+        <span className="expanded-label">SVD impact (with vs without)</span>
+        <span className="compare-meta">
+          {data.with_svd.length} with · {data.without_svd.length} without ·{" "}
+          {sameCount} unchanged · {newOnly.length} new · {dropped.length}{" "}
+          dropped · {moved.length} moved
+        </span>
+      </div>
+      <p className="compare-help">
+        Each row shows how the SVD layer changed the ranking compared to
+        TF‑IDF only. <strong>▲</strong> means SVD pushed the company up the
+        list; <strong>new via SVD</strong> means it would not have appeared
+        without latent concepts.
+      </p>
+      <div className="compare-table">
+        <div className="compare-table-head">
+          <span>Ticker</span>
+          <span>With SVD</span>
+          <span>Without SVD</span>
+          <span>Δ rank</span>
+          <span>Status</span>
+        </div>
+        {data.diff.slice(0, 12).map((d) => (
+          <div key={`cmp-${d.ticker}`} className="compare-table-row">
+            <span className="compare-ticker">{d.ticker}</span>
+            <span>{d.rank_with_svd ?? "—"}</span>
+            <span>{d.rank_without_svd ?? "—"}</span>
+            <span
+              className={
+                d.delta === null
+                  ? "compare-delta neutral"
+                  : d.delta > 0
+                    ? "compare-delta up"
+                    : d.delta < 0
+                      ? "compare-delta down"
+                      : "compare-delta neutral"
+              }
+            >
+              {d.delta === null ? "—" : d.delta > 0 ? `+${d.delta}` : d.delta}
+            </span>
+            <span className={`compare-status ${d.status}`}>{d.status}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function App(): JSX.Element {
   const [useLlm, setUseLlm] = useState<boolean | null>(null);
   const [queryMode, setQueryMode] = useState<QueryMode>("text");
@@ -126,6 +423,8 @@ function App(): JSX.Element {
   const [riskTolerance, setRiskTolerance] = useState("any");
   const [focus, setFocus] = useState("any");
   const [capPreference, setCapPreference] = useState("any");
+  const [searchMethod, setSearchMethod] = useState<SearchMethod>("hybrid");
+  const [compareData, setCompareData] = useState<CompareResponse | null>(null);
 
   useEffect(() => {
     fetch("/api/config")
@@ -134,9 +433,28 @@ function App(): JSX.Element {
       .catch(() => setUseLlm(false));
   }, []);
 
+  const mapStockRow = (d: Record<string, unknown>): Stock => ({
+    ticker: d.ticker as string,
+    name: d.name as string,
+    similarity: typeof d.score === "number" ? (d.score as number) : 0,
+    sector: d.sector as string | undefined,
+    industry: d.industry as string | undefined,
+    description: d.description as string | undefined,
+    market_cap: d.market_cap as number | string | undefined,
+    dividend_yield: d.dividend_yield as number | undefined,
+    website: d.website as string | undefined,
+    image: d.image as string | undefined,
+    explanation: d.explanation as Stock["explanation"],
+    city: d.city as string | undefined,
+    state: d.state as string | undefined,
+    country: d.country as string | undefined,
+    component_scores: d.component_scores as Stock["component_scores"],
+  });
+
   const handleSearch = async (value: string): Promise<void> => {
     setSearchTerm(value);
     setError(null);
+    setCompareData(null);
     if (value.trim() === "") {
       setStocks([]);
       setHasSearched(false);
@@ -146,71 +464,62 @@ function App(): JSX.Element {
     setHasSearched(true);
     setExpandedIdx(null);
     try {
-      const payload =
-        queryMode === "portfolio"
-          ? { portfolio: parsePortfolioInput(value) }
-          : { query: value };
+      if (queryMode === "portfolio") {
+        const portfolio = parsePortfolioInput(value);
+        if (portfolio.length === 0) {
+          setStocks([]);
+          setError("Enter at least one ticker or company name.");
+          return;
+        }
+      }
 
-      if (
-        queryMode === "portfolio" &&
-        (!payload.portfolio || payload.portfolio.length === 0)
-      ) {
-        setStocks([]);
-        setError("Enter at least one ticker or company name.");
+      const preferences = {
+        risk_tolerance: riskTolerance,
+        focus,
+        cap_preference: capPreference,
+      };
+
+      if (searchMethod === "compare" && queryMode === "text") {
+        const res = await fetch("/api/recommend/compare", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: value, top_n: 10 }),
+        });
+        if (!res.ok) throw new Error(`Server returned ${res.status}`);
+        const cmp = (await res.json()) as CompareResponse;
+        const mapped = (cmp.with_svd as unknown as Record<string, unknown>[]).map(mapStockRow);
+        setStocks(mapped);
+        setCompareData({
+          query: cmp.query,
+          with_svd: mapped,
+          without_svd: (cmp.without_svd as unknown as Record<string, unknown>[]).map(mapStockRow),
+          diff: cmp.diff,
+        });
         return;
       }
 
-      // Theme Search and Portfolio Match share backend endpoint.
+      const body =
+        queryMode === "portfolio"
+          ? {
+              portfolio: parsePortfolioInput(value),
+              preferences,
+            }
+          : {
+              query: value,
+              method: searchMethod === "tfidf" ? "tfidf" : "hybrid",
+              preferences,
+            };
+
       const res = await fetch("/api/recommend", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query: value,
-          preferences: {
-            risk_tolerance: riskTolerance,
-            focus: focus,
-            cap_preference: capPreference,
-          },
-        }),
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
 
-      const data = (await res.json()) as Array<{
-        ticker: string;
-        name: string;
-        score?: number;
-        sector?: string;
-        industry?: string;
-        market_cap?: number | string;
-        dividend_yield?: number;
-        description?: string;
-        image?: string;
-        website?: string;
-        explanation?: Stock["explanation"];
-        city?: string;
-        state?: string;
-        country?: string;
-      }>;
-
-      const mapped: Stock[] = data.map((d) => ({
-        ticker: d.ticker,
-        name: d.name,
-        similarity: typeof d.score === "number" ? d.score : 0,
-        sector: d.sector,
-        industry: d.industry,
-        description: d.description,
-        market_cap: d.market_cap,
-        dividend_yield: d.dividend_yield,
-        website: d.website,
-        image: d.image,
-        explanation: d.explanation,
-        city: d.city,
-        state: d.state,
-        country: d.country,
-      }));
-
-      setStocks(mapped);
+      const data = (await res.json()) as Record<string, unknown>[];
+      setStocks(data.map(mapStockRow));
     } catch (err) {
       setStocks([]);
       setError(err instanceof Error ? err.message : "Something went wrong");
@@ -450,6 +759,33 @@ function App(): JSX.Element {
           </button>
         </div>
 
+        {queryMode === "text" && (
+          <div className="method-tabs" title="Choose how rankings are computed">
+            <span className="method-tabs-label">Ranking</span>
+            <button
+              type="button"
+              className={`method-tab ${searchMethod === "hybrid" ? "active" : ""}`}
+              onClick={() => setSearchMethod("hybrid")}
+            >
+              With SVD <span className="method-tab-sub">(hybrid)</span>
+            </button>
+            <button
+              type="button"
+              className={`method-tab ${searchMethod === "tfidf" ? "active" : ""}`}
+              onClick={() => setSearchMethod("tfidf")}
+            >
+              Without SVD <span className="method-tab-sub">(TF‑IDF)</span>
+            </button>
+            <button
+              type="button"
+              className={`method-tab ${searchMethod === "compare" ? "active" : ""}`}
+              onClick={() => setSearchMethod("compare")}
+            >
+              Compare
+            </button>
+          </div>
+        )}
+
         <form className="search-form" onSubmit={handleSubmit}>
           <div className="search-input-wrap">
             <img src={SearchIcon} alt="" className="search-mag" />
@@ -619,6 +955,10 @@ function App(): JSX.Element {
         </div>
       )}
 
+      {compareData && stocks.length > 0 && (
+        <CompareSummary data={compareData} />
+      )}
+
       {stocks.length > 0 && (
         <div className="screener">
           <div className="screener-header">
@@ -651,6 +991,9 @@ function App(): JSX.Element {
               const centerNode = peerNodes[0];
               const peerOnlyNodes = peerNodes.slice(1);
               const peerCount = Math.max(peerNodes.length - 1, 0);
+              const diffEntry = compareData?.diff.find(
+                (d) => d.ticker === stock.ticker,
+              );
               const sectorLegend = Array.from(
                 new Map(
                   peerOnlyNodes
@@ -696,6 +1039,7 @@ function App(): JSX.Element {
                         <div className="row-top">
                           <span className="row-ticker">{stock.ticker}</span>
                           <span className="row-name">{stock.name}</span>
+                          {diffEntry && <RankBadge entry={diffEntry} />}
                         </div>
                         <span className="row-industry">
                           {stock.industry ?? stock.sector ?? ""}
@@ -1028,6 +1372,15 @@ function App(): JSX.Element {
                               })()}
                             </div>
                           )}
+                          {stock.explanation.latent &&
+                            stock.explanation.latent.dimensions &&
+                            stock.explanation.latent.dimensions.length > 0 && (
+                              <LatentDimensionPanel
+                                latent={stock.explanation.latent}
+                                tickerKey={stock.ticker}
+                                componentScores={stock.component_scores}
+                              />
+                            )}
                           {stock.explanation.snippets &&
                             stock.explanation.snippets.length > 0 && (
                               <div className="explain-snippets">
