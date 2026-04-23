@@ -1,7 +1,13 @@
 import { useState, useEffect } from "react";
 import "./App.css";
 import SearchIcon from "./assets/mag.png";
-import { Stock, QueryMode } from "./types";
+import {
+  Stock,
+  QueryMode,
+  RecommendResponse,
+  AiQuerySuggestion,
+  AiRecommendations,
+} from "./types";
 import Chat from "./Chat";
 
 const TICKER_COLORS: Record<string, string> = {
@@ -126,6 +132,10 @@ function App(): JSX.Element {
   const [riskTolerance, setRiskTolerance] = useState("any");
   const [focus, setFocus] = useState("any");
   const [capPreference, setCapPreference] = useState("any");
+  const [aiQuerySuggestion, setAiQuerySuggestion] =
+    useState<AiQuerySuggestion | null>(null);
+  const [aiRecommendations, setAiRecommendations] =
+    useState<AiRecommendations | null>(null);
 
   useEffect(() => {
     fetch("/api/config")
@@ -137,14 +147,19 @@ function App(): JSX.Element {
   const handleSearch = async (value: string): Promise<void> => {
     setSearchTerm(value);
     setError(null);
+
     if (value.trim() === "") {
       setStocks([]);
+      setAiQuerySuggestion(null);
+      setAiRecommendations(null)
       setHasSearched(false);
       return;
     }
+
     setLoading(true);
     setHasSearched(true);
     setExpandedIdx(null);
+
     try {
       const payload =
         queryMode === "portfolio"
@@ -153,9 +168,12 @@ function App(): JSX.Element {
 
       if (
         queryMode === "portfolio" &&
-        (!payload.portfolio || payload.portfolio.length === 0)
+        (!("portfolio" in payload) || !payload.portfolio ||
+          payload.portfolio.length === 0)
       ) {
         setStocks([]);
+        setAiQuerySuggestion(null);
+        setAiRecommendations(null);
         setError("Enter at least one ticker or company name.");
         return;
       }
@@ -165,7 +183,7 @@ function App(): JSX.Element {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          query: value,
+          ...payload,
           preferences: {
             risk_tolerance: riskTolerance,
             focus: focus,
@@ -176,22 +194,28 @@ function App(): JSX.Element {
 
       if (!res.ok) throw new Error(`Server returned ${res.status}`);
 
-      const data = (await res.json()) as Array<{
-        ticker: string;
-        name: string;
-        score?: number;
-        sector?: string;
-        industry?: string;
-        market_cap?: number | string;
-        dividend_yield?: number;
-        description?: string;
-        image?: string;
-        website?: string;
-        explanation?: Stock["explanation"];
-        city?: string;
-        state?: string;
-        country?: string;
-      }>;
+      const responseData = (await res.json()) as RecommendResponse;
+      const data = responseData.results ?? [];
+
+      setAiQuerySuggestion(responseData.ai_query_suggestion ?? null);
+      setAiRecommendations(responseData.ai_recommendations ?? null);
+
+      // const data = (await res.json()) as Array<{
+      //   ticker: string;
+      //   name: string;
+      //   score?: number;
+      //   sector?: string;
+      //   industry?: string;
+      //   market_cap?: number | string;
+      //   dividend_yield?: number;
+      //   description?: string;
+      //   image?: string;
+      //   website?: string;
+      //   explanation?: Stock["explanation"];
+      //   city?: string;
+      //   state?: string;
+      //   country?: string;
+      // }>;
 
       const maxScore =
         Math.max(
@@ -218,6 +242,8 @@ function App(): JSX.Element {
       setStocks(mapped);
     } catch (err) {
       setStocks([]);
+      setAiQuerySuggestion(null);
+      setAiRecommendations(null);
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setLoading(false);
@@ -933,11 +959,10 @@ function App(): JSX.Element {
                                       </span>
                                       <div className="score-breakdown-track">
                                         <span
-                                          className={`score-breakdown-fill ${
-                                            sentimentImpact >= 0
-                                              ? "positive"
-                                              : "negative"
-                                          }`}
+                                          className={`score-breakdown-fill ${sentimentImpact >= 0
+                                            ? "positive"
+                                            : "negative"
+                                            }`}
                                           style={{
                                             width: `${sentimentWidth}%`,
                                           }}

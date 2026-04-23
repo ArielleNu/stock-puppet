@@ -47,4 +47,37 @@ export interface Stock {
   };
 }
 
+export interface AiQuerySuggestion {
+  suggested_query: string;
+  reason?: string;
+}
+
+export interface AiRecommendations {
+  recommended_indices: number[];
+  summary?: string;
+  reasons?: Record<string, string>;
+}
+
+export interface RecommendResponse {
+  results: Array<{
+    ticker: string;
+    name: string;
+    score?: number;
+    sector?: string;
+    industry?: string;
+    market_cap?: number | string;
+    dividend_yield?: number;
+    description?: string;
+    image?: string;
+    website?: string;
+    city?: string;
+    state?: string;
+    country?: string;
+    sentiment?: number;
+    explanation?: Stock["explanation"];
+  }>;
+  ai_query_suggestion?: AiQuerySuggestion | null;
+  ai_recommendations?: AiRecommendations | null;
+}
+
 export type QueryMode = "text" | "portfolio";
