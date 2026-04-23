@@ -2,8 +2,8 @@
 HTTP routes: React app serving and the stock recommendation API.
 
 Ranking logic lives in ``recommender.py``; this module only glues it to
-Flask endpoints.  To enable the AI chat, set ``USE_LLM = True`` below and
-see ``llm_routes.py`` for the chat implementation.
+Flask endpoints.  To enable AI suggestions and grounded recommendations,
+set ``USE_LLM = True`` below and see ``llm_routes.py`` for the helpers.
 """
 import os
 
@@ -20,10 +20,11 @@ from recommender import (
     recommend_stocks,
 )
 from svd_index import get_company_svd_index
+from llm_routes import suggest_query, recommend_from_ir_results
 
 # ── AI toggle ────────────────────────────────────────────────────────────────
-USE_LLM = False
-# USE_LLM = True
+#USE_LLM = False
+USE_LLM = True
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -75,12 +76,19 @@ def register_routes(app):
     @app.route("/api/recommend", methods=["POST"])
     def recommend():
         """
-        Baseline recommendation endpoint.
+        Recommendation endpoint.
 
         Supports:
           - text queries like ``{"query": "AI semiconductor companies"}``
           - portfolio queries like ``{"portfolio": ["NVDA", "AMD"]}``
           - ``method`` = "hybrid" (default) | "svd" | "tfidf"
+
+        Returns:
+        {
+            "results": [...],
+            "ai_query_suggestion": {...} | null,
+            "ai_recommendations": {...} | null
+        }
         """
         data = request.get_json() or {}
         query = data.get("query", "")
@@ -89,16 +97,53 @@ def register_routes(app):
         method = data.get("method", "hybrid")
         preferences = data.get("preferences", {})
 
+        results = []
+        llm_basis_query = ""
+
         if query:
             results = recommend_from_text_query(query, method=method)
+            llm_basis_query = query
         elif portfolio:
             results = recommend_stocks(portfolio, mode=portfolio_mode)
+            llm_basis_query = " ".join(portfolio)
         else:
-            return jsonify([])
+            return jsonify({
+                "results": [],
+                "ai_query_suggestion": None,
+                "ai_recommendations": None,
+            })
 
         if preferences:
             results = apply_preferences(results, preferences)
-        return jsonify(results)
+
+        response = {
+            "results": results,
+            "ai_query_suggestion": None,
+            "ai_recommendations": None,
+        }
+
+        if USE_LLM and llm_basis_query and results:
+            try:
+                response["ai_query_suggestion"] = suggest_query(
+                    llm_basis_query,
+                    results,
+                )
+                response["ai_recommendations"] = recommend_from_ir_results(
+                    llm_basis_query,
+                    results,
+                )
+            except Exception as e:
+                response["ai_query_suggestion"] = {
+                    "suggested_query": llm_basis_query,
+                    "reason": f"LLM unavailable: {str(e)}",
+                }
+                response["ai_recommendations"] = {
+                    "recommended_indices": [],
+                    "summary": "LLM unavailable.",
+                    "reasons": {},
+                }
+
+        return jsonify(response)
 
     @app.route("/api/recommend/compare", methods=["POST"])
     def recommend_compare():
@@ -163,7 +208,3 @@ def register_routes(app):
         if not company:
             return jsonify({"error": "Company not found"}), 404
         return jsonify(company.to_dict())
-
-    if USE_LLM:
-        from llm_routes import register_chat_route
-        register_chat_route(app, json_search)
