@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import "./App.css";
 import SearchIcon from "./assets/mag.png";
 import {
@@ -136,6 +136,7 @@ function App(): JSX.Element {
     useState<AiQuerySuggestion | null>(null);
   const [aiRecommendations, setAiRecommendations] =
     useState<AiRecommendations | null>(null);
+  const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
     fetch("/api/config")
@@ -143,6 +144,25 @@ function App(): JSX.Element {
       .then((data) => setUseLlm(data.use_llm))
       .catch(() => setUseLlm(false));
   }, []);
+
+  const focusStockRow = (idx: number): void => {
+    const stock = stocks[idx]
+    if (!stock) return;
+
+    setExpandedIdx(idx);
+
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        const rowEl = rowRefs.current[stock.ticker];
+        if (rowEl) {
+          rowEl.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+          });
+        }
+      }, 80);
+    });
+  };
 
   const handleSearch = async (value: string): Promise<void> => {
     setSearchTerm(value);
@@ -708,7 +728,16 @@ function App(): JSX.Element {
                   return (
                     <div
                       key={`ai-pick-${stock.ticker}-${idx}`}
-                      className="ai-rec-card"
+                      className="ai-rec-card ai-rec-card-clickable"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => focusStockRow(idx)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          focusStockRow(idx);
+                        }
+                      }}
                     >
                       <div className="ai-rec-top">
                         <span className="ai-rec-ticker">{stock.ticker}</span>
@@ -718,6 +747,7 @@ function App(): JSX.Element {
                         {stock.industry ?? stock.sector ?? "—"}
                       </div>
                       {reason && <p className="ai-rec-reason">{reason}</p>}
+                      <span className="ai-rec-hint">Click to view in results</span>
                     </div>
                   );
                 })}
@@ -767,6 +797,9 @@ function App(): JSX.Element {
               return (
                 <div
                   key={`${stock.ticker}-${i}`}
+                  ref={(el) => {
+                    rowRefs.current[stock.ticker] = el;
+                  }}
                   className={`row ${isExpanded ? "row-expanded" : ""}`}
                   role="button"
                   tabIndex={0}
