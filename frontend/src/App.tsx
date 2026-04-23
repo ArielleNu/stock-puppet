@@ -175,6 +175,12 @@ function App(): JSX.Element {
       return;
     }
 
+    // clear old results immediately for any new search
+    setStocks([]);
+    setAiQuerySuggestion(null);
+    setAiRecommendations(null);
+    setExpandedIdx(null);
+
     setLoading(true);
     setHasSearched(true);
     setExpandedIdx(null);
@@ -218,23 +224,6 @@ function App(): JSX.Element {
 
       setAiQuerySuggestion(responseData.ai_query_suggestion ?? null);
       setAiRecommendations(responseData.ai_recommendations ?? null);
-
-      // const data = (await res.json()) as Array<{
-      //   ticker: string;
-      //   name: string;
-      //   score?: number;
-      //   sector?: string;
-      //   industry?: string;
-      //   market_cap?: number | string;
-      //   dividend_yield?: number;
-      //   description?: string;
-      //   image?: string;
-      //   website?: string;
-      //   explanation?: Stock["explanation"];
-      //   city?: string;
-      //   state?: string;
-      //   country?: string;
-      // }>;
 
       const maxScore =
         Math.max(
@@ -548,7 +537,6 @@ function App(): JSX.Element {
               onClick={() => {
                 const newQuery = aiQuerySuggestion.suggested_query;
                 setSearchTerm(newQuery);
-                setStocks([]);
                 handleSearch(newQuery);
               }}
             >
