@@ -17,9 +17,9 @@ from infosci_spark_client import LLMClient
 logger = logging.getLogger(__name__)
 
 def get_llm_client() -> LLMClient:
-    api_key = os.getenv("API_KEY")
+    api_key = os.getenv("SPARK_API_KEY")
     if not api_key:
-        raise RuntimeError("API_KEY not set – add it to your .env file")
+        raise RuntimeError("SPARK_API_KEY not set - add it to your .env file")
     return LLMClient(api_key = api_key)
 
 def try_parse_json(text: str) -> Dict[str, Any]:
@@ -207,9 +207,9 @@ def register_chat_route(app, json_search):
         if not user_message:
             return jsonify({"error": "Message is required"}), 400
 
-        api_key = os.getenv("API_KEY")
+        api_key = os.getenv("SPARK_API_KEY")
         if not api_key:
-            return jsonify({"error": "API_KEY not set — add it to your .env file"}), 500
+            raise RuntimeError("SPARK_API_KEY not set - add it to your .env file")
 
         client = LLMClient(api_key=api_key)
         use_search, search_term = llm_search_decision(client, user_message)

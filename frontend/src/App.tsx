@@ -654,6 +654,77 @@ function App(): JSX.Element {
         </div>
       )}
 
+      {!loading && !error && aiQuerySuggestion?.suggested_query && (
+        <div className="ai-panel">
+          <div className="ai-panel-header">
+            <span className="ai-panel-title">AI Query Suggestion</span>
+          </div>
+          <div className="ai-query-box">
+            <div className="ai-query-main">
+              <span className="ai-query-label">Suggested query</span>
+              <span className="ai-query-text">
+                {aiQuerySuggestion.suggested_query}
+              </span>
+            </div>
+            {aiQuerySuggestion.reason && (
+              <p className="ai-query-reason">{aiQuerySuggestion.reason}</p>
+            )}
+            <button
+              className="ai-query-run"
+              onClick={() => {
+                setSearchTerm(aiQuerySuggestion.suggested_query);
+                handleSearch(aiQuerySuggestion.suggested_query);
+              }}
+            >
+              Run suggested query
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!loading &&
+        !error &&
+        stocks.length > 0 &&
+        aiRecommendations &&
+        aiRecommendations.recommended_indices &&
+        aiRecommendations.recommended_indices.length > 0 && (
+          <div className="ai-panel">
+            <div className="ai-panel-header">
+              <span className="ai-panel-title">AI Recommended Results</span>
+            </div>
+
+            {aiRecommendations.summary && (
+              <p className="ai-rec-summary">{aiRecommendations.summary}</p>
+            )}
+
+            <div className="ai-rec-list">
+              {aiRecommendations.recommended_indices
+                .filter((idx) => idx >= 0 && idx < stocks.length)
+                .map((idx) => {
+                  const stock = stocks[idx];
+                  const reason =
+                    aiRecommendations.reasons?.[String(idx)] ?? "";
+
+                  return (
+                    <div
+                      key={`ai-pick-${stock.ticker}-${idx}`}
+                      className="ai-rec-card"
+                    >
+                      <div className="ai-rec-top">
+                        <span className="ai-rec-ticker">{stock.ticker}</span>
+                        <span className="ai-rec-name">{stock.name}</span>
+                      </div>
+                      <div className="ai-rec-meta">
+                        {stock.industry ?? stock.sector ?? "—"}
+                      </div>
+                      {reason && <p className="ai-rec-reason">{reason}</p>}
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        )}
+
       {stocks.length > 0 && (
         <div className="screener">
           <div className="screener-header">

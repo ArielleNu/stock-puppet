@@ -365,7 +365,7 @@ def register_routes(app):
                     "reasons": {},
                 }
 
-        return jsonify(results)
+        return jsonify(response)
 
     @app.route("/api/peers/<ticker>")
     def global_peers(ticker: str):
