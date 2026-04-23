@@ -69,19 +69,9 @@ export async function fetchRecommend(body: unknown): Promise<RecommendResult> {
   }
 
   const results = payload.results ?? [];
-  // Normalize similarity to max=1 within the result set to preserve
-  // existing UI behaviour for "match %" bars.
-  const maxScore =
-    Math.max(
-      ...results.map((d) => (typeof d.score === "number" ? d.score : 0)),
-    ) || 1;
-  const stocks: Stock[] = results.map((d) => {
-    const base = mapStockRow(d as unknown as Record<string, unknown>);
-    return {
-      ...base,
-      similarity: (typeof d.score === "number" ? d.score : 0) / maxScore,
-    };
-  });
+  const stocks: Stock[] = results.map((d) =>
+    mapStockRow(d as unknown as Record<string, unknown>),
+  );
   return {
     stocks,
     aiQuerySuggestion: payload.ai_query_suggestion ?? null,
