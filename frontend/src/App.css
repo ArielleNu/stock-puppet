@@ -1766,7 +1766,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 8px auto 0;
+  margin: 8px auto 30px;
   padding: 4px 6px;
   background: var(--bg-card, #131722);
   border: 1px solid #2a2e39;
@@ -1825,11 +1825,9 @@
   padding: 14px 16px;
   border: 1px solid #2a2e39;
   border-radius: 10px;
-  background: linear-gradient(
-    180deg,
-    rgba(41, 98, 255, 0.05) 0%,
-    rgba(19, 23, 34, 0.6) 100%
-  );
+  background: linear-gradient(180deg,
+      rgba(41, 98, 255, 0.05) 0%,
+      rgba(19, 23, 34, 0.6) 100%);
 }
 
 .latent-header {
@@ -2210,6 +2208,7 @@
 }
 
 @media (max-width: 700px) {
+
   .compare-table-head,
   .compare-table-row {
     grid-template-columns: 1fr 0.6fr 0.7fr 0.6fr 0.9fr;
