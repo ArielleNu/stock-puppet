@@ -22,6 +22,39 @@ import {
 } from "./utils/api";
 import { parsePortfolioInput } from "./utils/format";
 import { PeerScope } from "./utils/peers";
+type SearchHistoryItem = {
+  id: string;
+  mode: QueryMode;
+  query: string;
+  portfolioTickers?: string[];
+  portfolioMode?: "similar" | "diversify";
+  searchMethod?: SearchMethod;
+  riskTolerance?: string;
+  focus?: string;
+  capPreference?: string;
+  timestamp: number;
+};
+const timeAgo = (timestamp: number): string => {
+  const now = Date.now();
+  const diff = Math.floor((now - timestamp) / 1000); // seconds
+
+  if (diff < 60) return "just now";
+
+  const minutes = Math.floor(diff / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+
+  const years = Math.floor(months / 12);
+  return `${years}y ago`;
+};
 
 function App(): JSX.Element {
   const [useLlm, setUseLlm] = useState<boolean | null>(null);
@@ -60,11 +93,26 @@ function App(): JSX.Element {
   const [prefsClosing, setPrefsClosing] = useState(false);
   const [collapsingIdx, setCollapsingIdx] = useState<number | null>(null);
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const prefsRef = useRef<HTMLDivElement | null>(null);
+  const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
 
   useEffect(() => {
     fetchConfig()
       .then((data) => setUseLlm(Boolean(data.use_llm)))
       .catch(() => setUseLlm(false));
+  }, []);
+
+  useEffect(() => {
+    const raw = localStorage.getItem("stockpuppet-search-history");
+    if (!raw) return;
+
+    try {
+      const parsed = JSON.parse(raw) as SearchHistoryItem[];
+      setSearchHistory(parsed);
+    } catch {
+      localStorage.removeItem("stockpuppet-search-history");
+    }
   }, []);
 
   const expandAndFocusRow = (idx: number): void => {
@@ -130,6 +178,68 @@ function App(): JSX.Element {
 
       setIsResetting(false);
     }, 180); // matches CSS transition
+  };
+
+  const saveSearchHistoryItem = (value: string): void => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+
+    const item: SearchHistoryItem = {
+      id: `${Date.now()}-${trimmed}`,
+      mode: queryMode,
+      query: trimmed,
+      portfolioTickers:
+        queryMode === "portfolio"
+          ? portfolioTickers.length > 0
+            ? portfolioTickers
+            : parsePortfolioInput(trimmed)
+          : undefined,
+      portfolioMode: queryMode === "portfolio" ? portfolioMode : undefined,
+      searchMethod: queryMode === "text" ? searchMethod : undefined,
+      riskTolerance,
+      focus,
+      capPreference,
+      timestamp: Date.now(),
+    };
+
+    setSearchHistory((prev) => {
+      const withoutDuplicate = prev.filter(
+        (h) =>
+          !(
+            h.mode === item.mode &&
+            h.query.toLowerCase() === item.query.toLowerCase() &&
+            h.portfolioMode === item.portfolioMode &&
+            h.riskTolerance === item.riskTolerance &&
+            h.focus === item.focus &&
+            h.capPreference === item.capPreference &&
+            h.searchMethod === item.searchMethod
+          ),
+      );
+
+      const next = [item, ...withoutDuplicate].slice(0, 8);
+      localStorage.setItem("stockpuppet-search-history", JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const runHistorySearch = (item: SearchHistoryItem): void => {
+    setShowHistory(false);
+    setQueryMode(item.mode);
+    setRiskTolerance(item.riskTolerance ?? "any");
+    setFocus(item.focus ?? "any");
+    setCapPreference(item.capPreference ?? "any");
+
+    if (item.mode === "portfolio") {
+      setPortfolioMode(item.portfolioMode ?? "similar");
+      setPortfolioTickers(item.portfolioTickers ?? parsePortfolioInput(item.query));
+      setSearchTerm(item.query);
+      handleSearch(item.query);
+      return;
+    }
+
+    setSearchMethod(item.searchMethod ?? "hybrid");
+    setSearchTerm(item.query);
+    handleSearch(item.query);
   };
 
   const runSearch = async (value: string): Promise<void> => {
@@ -201,6 +311,7 @@ function App(): JSX.Element {
 
     try {
       await runSearch(value);
+      saveSearchHistoryItem(value);
     } catch (err) {
       setStocks([]);
       setAiQuerySuggestion(null);
@@ -366,27 +477,91 @@ function App(): JSX.Element {
               </span>
             </button>
           )}
+        <div className="utility-actions">
+          <button className="prefs-toggle" onClick={() => {
+            if (showPrefs) {
+              setPrefsClosing(true);
+              setTimeout(() => {
+                setShowPrefs(false);
+                setPrefsClosing(false);
+              }, 180);
+            } else {
+              setShowPrefs(true);
 
-        <button className="prefs-toggle" onClick={() => {
-          if (showPrefs) {
-            setPrefsClosing(true);
-            setTimeout(() => {
-              setShowPrefs(false);
-              setPrefsClosing(false);
-            }, 180);
-          } else {
-            setShowPrefs(true);
-          }
-        }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M12 3v1m0 16v1m-8-9H3m18 0h-1m-2.636-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707-.707" />
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-          {showPrefs ? "Hide Preferences" : "Preferences"}
-        </button>
+              requestAnimationFrame(() => {
+                setTimeout(() => {
+                  const el = prefsRef.current;
+                  if (!el) return;
 
+                  const rect = el.getBoundingClientRect();
+                  const bottomOffset = 32;
+
+                  window.scrollTo({
+                    top: window.scrollY + rect.bottom - window.innerHeight + bottomOffset,
+                    behavior: "smooth",
+                  });
+                }, 80);
+              });
+            }
+          }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 3v1m0 16v1m-8-9H3m18 0h-1m-2.636-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707-.707" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+            {showPrefs ? "Hide Preferences" : "Preferences"}
+          </button>
+
+          <button
+            type="button"
+            className="prefs-toggle"
+            onClick={() => setShowHistory(!showHistory)}
+            disabled={searchHistory.length === 0}
+          >
+            History
+          </button>
+        </div>
+        {showHistory && searchHistory.length > 0 && (
+          <div className="history-panel">
+            <div className="history-header">
+              <span>Recent Searches</span>
+              <button
+                type="button"
+                className="history-clear"
+                onClick={() => {
+                  setSearchHistory([]);
+                  localStorage.removeItem("stockpuppet-search-history");
+                }}
+              >
+                Clear History
+              </button>
+            </div>
+
+            {searchHistory.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className="history-item"
+                onClick={() => runHistorySearch(item)}
+              >
+                <div className="history-main">
+                  <span className="history-mode">
+                    {item.mode === "portfolio" ? "Portfolio" : "Theme"}
+                  </span>
+                  <span className="history-query">{item.query}</span>
+                </div>
+
+                <span className="history-time">
+                  {timeAgo(item.timestamp)}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
         {showPrefs && (
-          <div className={`prefs-panel-wrap ${prefsClosing ? "prefs-closing" : ""}`}>
+          <div
+            ref={prefsRef}
+            className={`prefs-panel-wrap ${prefsClosing ? "prefs-closing" : ""}`}
+          >
             <PreferencesPanel
               riskTolerance={riskTolerance}
               focus={focus}
