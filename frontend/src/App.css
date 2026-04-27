@@ -1,3 +1,16 @@
+/* ==========================================================================
+   StockPuppet App Styles
+
+   Organization:
+   1. App shell / navigation
+   2. Hero, mode tabs, search, and state messages
+   3. Results screener rows and expanded result content
+   4. RAG / AI panels
+   5. Responsive and accessibility overrides
+   6. Preferences drawer and advanced controls
+   7. SVD / compare / portfolio-specific components
+   ========================================================================== */
+
 .app {
   min-height: 100vh;
   display: flex;
@@ -6,7 +19,9 @@
   color: var(--text-primary);
 }
 
-/* nav */
+/* ==========================================================================
+   App shell and sticky navigation
+   ========================================================================== */
 
 .topbar {
   display: flex;
@@ -59,7 +74,9 @@
   color: var(--text-muted);
 }
 
-/* hero */
+/* ==========================================================================
+   Hero / landing area
+   ========================================================================== */
 
 .hero {
   display: flex;
@@ -110,7 +127,7 @@
   margin-bottom: 1.5rem;
 }
 
-/* hero compact (after results load) */
+/* Compact hero: used after the first search so controls stay near results */
 
 .hero-compact {
   padding: 1rem 1.5rem 1rem;
@@ -122,7 +139,7 @@
   display: none;
 }
 
-/* tabs */
+/* Theme vs. Portfolio mode tabs */
 
 .mode-tabs {
   display: flex;
@@ -162,7 +179,7 @@
   flex-shrink: 0;
 }
 
-/* top left logo – reset button */
+/* Top-left brand button: resets app back to the landing state */
 
 .brand-button {
   all: unset;
@@ -183,7 +200,7 @@
   filter: brightness(0.9);
 }
 
-/* search */
+/* Main search input and submit button */
 
 .search-form {
   display: flex;
@@ -275,7 +292,7 @@
   }
 }
 
-/* state messages */
+/* Loading, error, and empty states */
 
 .state-message {
   display: flex;
@@ -292,7 +309,7 @@
   color: var(--bearish);
 }
 
-/* content fade */
+/* Fade transition used when resetting from results back to home */
 
 .content {
   transition: opacity 0.18s ease, transform 0.18s ease;
@@ -303,7 +320,7 @@
   transform: translateY(6px);
 }
 
-/* screener */
+/* Results screener container and header columns */
 
 .screener {
   width: 100%;
@@ -359,7 +376,7 @@
   width: 80px;
 }
 
-/* rows */
+/* Result rows: collapsed row layout */
 
 .row {
   display: flex;
@@ -485,7 +502,7 @@
   line-height: 1.4;
 }
 
-/* data cells */
+/* Result row data cells: match, market cap, dividend, sentiment */
 
 .row-data {
   display: flex;
@@ -558,7 +575,7 @@
   color: var(--text-muted);
 }
 
-/* expanded card */
+/* Expanded result details, explanations, and peer network */
 
 .row-expanded {
   background: var(--bg-hover);
@@ -570,6 +587,24 @@
   padding-left: 100px;
   border-top: 1px solid var(--border);
   animation: expandIn 0.2s ease-out;
+}
+
+.row-expanded-card.row-collapsing {
+  animation: collapseOut 0.18s ease-in forwards;
+}
+
+@keyframes collapseOut {
+  from {
+    opacity: 1;
+    max-height: 1200px;
+    transform: translateY(0);
+  }
+
+  to {
+    opacity: 0;
+    max-height: 0;
+    transform: translateY(-6px);
+  }
 }
 
 .peer-network-card {
@@ -1019,7 +1054,7 @@
   line-height: 1.45;
 }
 
-/* skeleton loading */
+/* Skeleton loading rows */
 
 @keyframes shimmer {
   0% {
@@ -1102,7 +1137,7 @@
   animation: shimmer 1.5s infinite linear;
 }
 
-/* ai recommendation mode */
+/* RAG / AI recommendation panels and query suggestion tooltip */
 
 .ai-panel {
   width: 100%;
@@ -1330,7 +1365,6 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  /* gap: 4px; */
   min-width: 0;
   flex: 1;
 }
@@ -1353,150 +1387,9 @@
   font-style: italic;
 }
 
-/* chat */
-
-#messages {
-  width: 100%;
-  max-width: 780px;
-  margin: 16px auto 0;
-  flex: 1;
-  overflow-y: auto;
-  padding: 0 16px 8px;
-}
-
-.message {
-  margin-bottom: 1em;
-}
-
-.message p {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: "Inter", sans-serif;
-  font-size: 0.9rem;
-  line-height: 1.6;
-  color: var(--text-primary);
-}
-
-.message.user p {
-  color: var(--accent);
-  font-weight: 500;
-}
-
-.loading-indicator {
-  display: none;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 1em;
-}
-
-.loading-indicator.visible {
-  display: flex;
-}
-
-.loading-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--accent);
-  animation: loading-bounce 0.6s ease-in-out infinite;
-}
-
-.loading-dot:nth-child(1) {
-  animation-delay: 0s;
-}
-
-.loading-dot:nth-child(2) {
-  animation-delay: 0.15s;
-}
-
-.loading-dot:nth-child(3) {
-  animation-delay: 0.3s;
-}
-
-@keyframes loading-bounce {
-
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-
-  50% {
-    transform: translateY(-8px);
-  }
-}
-
-.chat-bar {
-  width: 100%;
-  flex-shrink: 0;
-  padding: 12px 16px;
-  border-top: 1px solid var(--border);
-  background: var(--bg-primary);
-}
-
-.chat-bar .input-row {
-  display: flex;
-  align-items: center;
-  max-width: 620px;
-  margin: 0 auto;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  padding: 10px 10px 10px 16px;
-  gap: 8px;
-  background: var(--bg-card);
-}
-
-.chat-bar .input-row:focus-within {
-  border-color: var(--accent);
-}
-
-.chat-bar .input-row img {
-  height: 16px;
-  width: 16px;
-  flex-shrink: 0;
-  filter: invert(1);
-  opacity: 0.35;
-}
-
-.chat-bar .input-row input {
-  flex: 1;
-  min-width: 0;
-  font-size: 0.875rem;
-  border: none;
-  outline: 0;
-  background: transparent;
-  color: var(--text-primary);
-  font-family: "Inter", sans-serif;
-}
-
-.chat-bar .input-row input::placeholder {
-  color: var(--text-dim);
-}
-
-.chat-bar .input-row button {
-  flex-shrink: 0;
-  padding: 8px 16px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  border-radius: 6px;
-  border: none;
-  background: var(--accent);
-  color: #fff;
-  cursor: pointer;
-  font-family: "Inter", sans-serif;
-  transition: background 0.15s;
-}
-
-.chat-bar .input-row button:hover:not(:disabled) {
-  background: var(--accent-hover);
-}
-
-.chat-bar .input-row button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* responsive */
+/* ==========================================================================
+   Responsive breakpoints
+   ========================================================================== */
 
 @media (max-width: 768px) {
   .hero {
@@ -1634,7 +1527,7 @@
   }
 }
 
-/* reduced motion */
+/* Reduced-motion accessibility overrides */
 
 @media (prefers-reduced-motion: reduce) {
   .spinner {
@@ -1672,7 +1565,9 @@
   }
 }
 
-/* preferences */
+/* ==========================================================================
+   Preferences drawer and segmented controls
+   ========================================================================== */
 
 .prefs-toggle {
   display: flex;
@@ -1697,20 +1592,60 @@
 }
 
 .prefs-panel {
-  display: flex;
-  gap: 24px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px 32px;
   margin-top: 12px;
   padding: 16px 20px;
   background: #1e222d;
   border: 1px solid #2a2e39;
   border-radius: 10px;
-  animation: expandIn 0.2s ease-out;
+  width: 750px;
+  box-sizing: border-box;
+}
+
+.prefs-panel-wrap {
+  animation: prefsOpen 0.18s ease-out;
+  overflow: hidden;
+}
+
+.prefs-panel-wrap.prefs-closing {
+  animation: prefsClose 0.18s ease-in forwards;
+}
+
+@keyframes prefsOpen {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+    max-height: 0;
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    max-height: 500px;
+  }
+}
+
+@keyframes prefsClose {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+    max-height: 500px;
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-6px);
+    max-height: 0;
+  }
 }
 
 .pref-group {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 
 .pref-label {
@@ -1723,19 +1658,28 @@
 }
 
 .pref-options {
-  display: flex;
+  display: inline-flex;
   gap: 4px;
+  padding: 4px 4px;
+  background: var(--bg-card, #131722);
+  border: 1px solid #2a2e39;
+  border-radius: 8px;
+  width: fit-content;
+}
+
+.pref-options .pref-btn {
+  border-color: transparent;
 }
 
 .pref-btn {
   padding: 5px 12px;
   font-family: "Inter", sans-serif;
   font-size: 0.7rem;
-  font-weight: 500;
+  font-weight: 600;
   border-radius: 5px;
-  border: 1px solid #2a2e39;
+  border: 1px solid transparent;
   background: transparent;
-  color: #787b86;
+  color: #b0b6c0;
   cursor: pointer;
   transition: all 0.15s;
 }
@@ -1753,21 +1697,58 @@
 
 @media (max-width: 768px) {
   .prefs-panel {
-    flex-direction: column;
+    grid-template-columns: 1fr;
+    width: min(840px, calc(100% - 2rem));
     gap: 14px;
   }
 }
 
-/* ───────────────────────────────────────────────────────────────────── */
+.pref-group-wide {
+  grid-column: 1 / -1;
+  width: 100%;
+  padding-top: 4px;
+}
+
+.method-tabs.in-prefs {
+  margin: 0;
+  width: fit-content;
+}
+
+.portfolio-current-label {
+  font-family: "Inter", sans-serif;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #8f96a8;
+  margin-top: 8px;
+}
+
+
+
+.portfolio-builder.in-prefs {
+  margin-top: 0;
+  max-width: none;
+  align-items: stretch;
+  gap: 8px;
+}
+
+
+.portfolio-builder.in-prefs .ticker-input-row {
+  width: 100%;
+  max-width: none;
+}
+
+/* ========================================================================== */
 /* Search method tabs (With SVD / Without SVD / Compare)                 */
-/* ───────────────────────────────────────────────────────────────────── */
+/* ========================================================================== */
 
 .method-tabs {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin: 8px auto 30px;
-  padding: 4px 6px;
+  gap: 4px;
+  /* margin: 8px auto 30px; */
+  padding: 4px 4px;
   background: var(--bg-card, #131722);
   border: 1px solid #2a2e39;
   border-radius: 8px;
@@ -1786,7 +1767,7 @@
 .method-tab {
   padding: 5px 12px;
   font-family: "Inter", sans-serif;
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 600;
   border-radius: 5px;
   border: 1px solid transparent;
@@ -1816,9 +1797,9 @@
   opacity: 0.85;
 }
 
-/* ───────────────────────────────────────────────────────────────────── */
+/* ========================================================================== */
 /* Latent dimension panel                                                */
-/* ───────────────────────────────────────────────────────────────────── */
+/* ========================================================================== */
 
 .latent-card {
   margin-top: 14px;
@@ -2055,9 +2036,9 @@
   color: #ffd0cf;
 }
 
-/* ───────────────────────────────────────────────────────────────────── */
+/* ========================================================================== */
 /* Compare summary card + rank delta badges                              */
-/* ───────────────────────────────────────────────────────────────────── */
+/* ========================================================================== */
 
 .compare-card {
   margin: 0 auto 14px;
@@ -2228,9 +2209,9 @@
   }
 }
 
-/* ───────────────────────────────────────────────────────────────────── */
+/* ========================================================================== */
 /* Portfolio builder (ticker chips + similar/diversify mode tabs)        */
-/* ───────────────────────────────────────────────────────────────────── */
+/* ========================================================================== */
 
 .portfolio-builder {
   display: flex;
@@ -2243,9 +2224,32 @@
 }
 
 .portfolio-mode-tabs {
-  display: flex;
+  display: inline-flex;
   gap: 4px;
+  padding: 4px 4px;
+  background: var(--bg-card, #131722);
+  border: 1px solid #2a2e39;
+  border-radius: 8px;
+  width: fit-content;
 }
+
+.portfolio-mode-tabs .pref-btn {
+  border-color: transparent;
+  padding: 5px 12px;
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+
+
+
+.portfolio-mode-tabs .pref-btn.active {
+  background: #2962ff;
+  border-color: #2962ff;
+  color: #fff;
+}
+
+
 
 .ticker-input-row {
   display: flex;
@@ -2260,17 +2264,22 @@
   font-size: 0.8rem;
   background: #1e222d;
   border: 1px solid #2a2e39;
+  /* border: 1px solid #2f3545; */
   border-radius: 6px;
   color: #d1d4dc;
   outline: none;
+  width: 100%;
+  /* box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02); */
 }
 
 .ticker-add-input:focus {
   border-color: #2962ff;
+  /* box-shadow: 0 0 0 2px rgba(41, 98, 255, 0.15); */
 }
 
 .ticker-add-input::placeholder {
-  color: #4c525e;
+  /* color: #4c525e; */
+  color: #6b7280;
 }
 
 .ticker-add-btn {
@@ -2324,14 +2333,24 @@
   color: #ef5350;
 }
 
+.ticker-clear-row {
+  flex: 0 0 100%;
+  display: flex;
+  justify-content: center;
+  /* or flex-start */
+}
+
 .ticker-clear-btn {
   background: none;
   border: none;
+  /* flex: 0 0 100%; */
   font-family: "Inter", sans-serif;
   font-size: 0.7rem;
   color: #787b86;
   cursor: pointer;
   padding: 4px 8px;
+  /* width: max-content; */
+  margin-top: 6px;
 }
 
 .ticker-clear-btn:hover {

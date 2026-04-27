@@ -15,6 +15,7 @@ interface ResultRowProps {
   stock: Stock;
   index: number;
   isExpanded: boolean;
+  isCollapsing?: boolean;
   onToggleExpand: () => void;
   diffEntry?: CompareDiffEntry;
   peerScope: PeerScope;
@@ -218,6 +219,7 @@ function ExplanationBlock({ stock }: { stock: Stock }): JSX.Element | null {
 export default function ResultRow({
   stock,
   isExpanded,
+  isCollapsing,
   onToggleExpand,
   diffEntry,
   peerScope,
@@ -245,7 +247,7 @@ export default function ResultRow({
       </div>
 
       {isExpanded && (
-        <div className="row-expanded-card">
+        <div className={`row-expanded-card ${isCollapsing ? "row-collapsing" : ""}`}>
           <ExpandedMetaGrid stock={stock} />
           {stock.description && (
             <div className="expanded-desc-full">

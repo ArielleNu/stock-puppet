@@ -57,6 +57,8 @@ function App(): JSX.Element {
   const [aiRecommendations, setAiRecommendations] =
     useState<AiRecommendations | null>(null);
   const [isResetting, setIsResetting] = useState(false);
+  const [prefsClosing, setPrefsClosing] = useState(false);
+  const [collapsingIdx, setCollapsingIdx] = useState<number | null>(null);
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
@@ -65,9 +67,33 @@ function App(): JSX.Element {
       .catch(() => setUseLlm(false));
   }, []);
 
-  const focusStockRow = (idx: number): void => {
+  const expandAndFocusRow = (idx: number): void => {
     const stock = stocks[idx];
     if (!stock) return;
+
+    const isClosing = expandedIdx === idx;
+
+    if (isClosing) {
+      setCollapsingIdx(idx);
+
+      setTimeout(() => {
+        setExpandedIdx(null);
+        setCollapsingIdx(null);
+
+        const rowEl = rowRefs.current[stock.ticker];
+        if (rowEl) {
+          const topbarOffset = 90;
+          const rowTop = rowEl.getBoundingClientRect().top + window.scrollY;
+
+          window.scrollTo({
+            top: rowTop - topbarOffset,
+            behavior: "smooth",
+          });
+        }
+      }, 180);
+
+      return;
+    }
 
     setExpandedIdx(idx);
 
@@ -75,33 +101,12 @@ function App(): JSX.Element {
       setTimeout(() => {
         const rowEl = rowRefs.current[stock.ticker];
         if (rowEl) {
-          rowEl.scrollIntoView({
+          const topbarOffset = 90;
+          const rowTop = rowEl.getBoundingClientRect().top + window.scrollY;
+
+          window.scrollTo({
+            top: rowTop - topbarOffset,
             behavior: "smooth",
-            block: "start",
-          });
-        }
-      }, 80);
-    });
-  };
-
-  const expandAndFocusRow = (idx: number): void => {
-    const stock = stocks[idx];
-    if (!stock) return;
-
-    const wasExpanded = expandedIdx === idx;
-    const nextExpanded = wasExpanded ? null : idx;
-
-    setExpandedIdx(nextExpanded);
-
-    if (nextExpanded === null) return;
-
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        const rowEl = rowRefs.current[stock.ticker];
-        if (rowEl) {
-          rowEl.scrollIntoView({
-            behavior: "smooth",
-            block: "start",
           });
         }
       }, 80);
@@ -284,110 +289,6 @@ function App(): JSX.Element {
             Portfolio Match
           </button>
         </div>
-        {queryMode === "portfolio" && (
-          <div className="portfolio-builder">
-            <div className="portfolio-mode-tabs">
-              <button
-                className={`pref-btn ${portfolioMode === "similar" ? "active" : ""}`}
-                onClick={() => setPortfolioMode("similar")}
-              >
-                Find Similar
-              </button>
-              <button
-                className={`pref-btn ${portfolioMode === "diversify" ? "active" : ""}`}
-                onClick={() => setPortfolioMode("diversify")}
-              >
-                Diversify
-              </button>
-            </div>
-
-            <div className="ticker-input-row">
-              <input
-                className="ticker-add-input"
-                placeholder="Add ticker (e.g. NVDA)"
-                value={tickerInput}
-                onChange={(e) => setTickerInput(e.target.value.toUpperCase())}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    const t = tickerInput.trim().toUpperCase();
-                    if (t && !portfolioTickers.includes(t)) {
-                      setPortfolioTickers([...portfolioTickers, t]);
-                    }
-                    setTickerInput("");
-                  }
-                }}
-              />
-              <button
-                type="button"
-                className="ticker-add-btn"
-                onClick={() => {
-                  const t = tickerInput.trim().toUpperCase();
-                  if (t && !portfolioTickers.includes(t)) {
-                    setPortfolioTickers([...portfolioTickers, t]);
-                  }
-                  setTickerInput("");
-                }}
-              >
-                Add
-              </button>
-            </div>
-
-            {portfolioTickers.length > 0 && (
-              <div className="ticker-chips">
-                {portfolioTickers.map((t) => (
-                  <span key={t} className="ticker-chip">
-                    {t}
-                    <button
-                      className="ticker-chip-x"
-                      onClick={() =>
-                        setPortfolioTickers(
-                          portfolioTickers.filter((x) => x !== t),
-                        )
-                      }
-                    >
-                      &times;
-                    </button>
-                  </span>
-                ))}
-                <button
-                  className="ticker-clear-btn"
-                  onClick={() => setPortfolioTickers([])}
-                >
-                  Clear all
-                </button>
-              </div>
-            )}
-          </div>
-        )}
-
-        {queryMode === "text" && (
-          <div className="method-tabs" title="Choose how rankings are computed">
-            <span className="method-tabs-label">Ranking</span>
-            <button
-              type="button"
-              className={`method-tab ${searchMethod === "hybrid" ? "active" : ""}`}
-              onClick={() => setSearchMethod("hybrid")}
-            >
-              With SVD <span className="method-tab-sub">(hybrid)</span>
-            </button>
-            <button
-              type="button"
-              className={`method-tab ${searchMethod === "tfidf" ? "active" : ""}`}
-              onClick={() => setSearchMethod("tfidf")}
-            >
-              Without SVD <span className="method-tab-sub">(TF‑IDF)</span>
-            </button>
-            <button
-              type="button"
-              className={`method-tab ${searchMethod === "compare" ? "active" : ""}`}
-              onClick={() => setSearchMethod("compare")}
-            >
-              Compare
-            </button>
-          </div>
-        )}
-
         <form className="search-form" onSubmit={handleSubmit}>
           <div className="search-input-wrap">
             <img src={SearchIcon} alt="" className="search-mag" />
@@ -419,7 +320,7 @@ function App(): JSX.Element {
           aiQuerySuggestion?.suggested_query &&
           aiQuerySuggestion.suggested_query.trim() &&
           aiQuerySuggestion.suggested_query.trim().toLowerCase() !==
-            searchTerm.trim().toLowerCase() && (
+          searchTerm.trim().toLowerCase() && (
             <button
               type="button"
               className="ai-query-tooltip"
@@ -466,7 +367,17 @@ function App(): JSX.Element {
             </button>
           )}
 
-        <button className="prefs-toggle" onClick={() => setShowPrefs(!showPrefs)}>
+        <button className="prefs-toggle" onClick={() => {
+          if (showPrefs) {
+            setPrefsClosing(true);
+            setTimeout(() => {
+              setShowPrefs(false);
+              setPrefsClosing(false);
+            }, 180);
+          } else {
+            setShowPrefs(true);
+          }
+        }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M12 3v1m0 16v1m-8-9H3m18 0h-1m-2.636-6.364l-.707.707M6.343 17.657l-.707.707m12.728 0l-.707-.707M6.343 6.343l-.707-.707" />
             <circle cx="12" cy="12" r="3" />
@@ -475,174 +386,193 @@ function App(): JSX.Element {
         </button>
 
         {showPrefs && (
-          <PreferencesPanel
-            riskTolerance={riskTolerance}
-            focus={focus}
-            capPreference={capPreference}
-            onRiskChange={setRiskTolerance}
-            onFocusChange={setFocus}
-            onCapChange={setCapPreference}
-          />
+          <div className={`prefs-panel-wrap ${prefsClosing ? "prefs-closing" : ""}`}>
+            <PreferencesPanel
+              riskTolerance={riskTolerance}
+              focus={focus}
+              capPreference={capPreference}
+              onRiskChange={setRiskTolerance}
+              onFocusChange={setFocus}
+              onCapChange={setCapPreference}
+              queryMode={queryMode}
+              searchMethod={searchMethod}
+              onSearchMethodChange={setSearchMethod}
+              portfolioMode={portfolioMode}
+              onPortfolioModeChange={setPortfolioMode}
+              portfolioTickers={portfolioTickers}
+              onPortfolioTickersChange={setPortfolioTickers}
+              tickerInput={tickerInput}
+              onTickerInputChange={setTickerInput}
+            />
+          </div>
         )}
       </div>
-
-      {loading && (
-        <div className="screener">
-          {[0, 1, 2, 3].map((i) => (
-            <div key={i} className="skeleton-row">
-              <div className="skeleton-badge" />
-              <div className="skeleton-info">
-                <div className="skeleton-line skeleton-line-title" />
-                <div className="skeleton-line skeleton-line-sub" />
-                <div className="skeleton-line skeleton-line-desc" />
+      {
+        loading && (
+          <div className="screener">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="skeleton-row">
+                <div className="skeleton-badge" />
+                <div className="skeleton-info">
+                  <div className="skeleton-line skeleton-line-title" />
+                  <div className="skeleton-line skeleton-line-sub" />
+                  <div className="skeleton-line skeleton-line-desc" />
+                </div>
+                <div className="skeleton-cells">
+                  <div className="skeleton-cell" />
+                  <div className="skeleton-cell" />
+                  <div className="skeleton-cell" />
+                </div>
               </div>
-              <div className="skeleton-cells">
-                <div className="skeleton-cell" />
-                <div className="skeleton-cell" />
-                <div className="skeleton-cell" />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )
+      }
 
-      {error && (
-        <div className="state-message error-state">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef5350" strokeWidth="2">
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 8v4M12 16h.01" />
-          </svg>
-          <span>{error}</span>
-        </div>
-      )}
+      {
+        error && (
+          <div className="state-message error-state">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ef5350" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 8v4M12 16h.01" />
+            </svg>
+            <span>{error}</span>
+          </div>
+        )
+      }
 
-      {!error && hasSearched && !loading && stocks.length === 0 && (
-        <div className="state-message empty-state">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#787b86" strokeWidth="2">
-            <circle cx="11" cy="11" r="8" />
-            <path d="M21 21l-4.35-4.35" />
-            <path d="M8 11h6" />
-          </svg>
-          <span>No matching stocks found. Try a different query.</span>
-        </div>
-      )}
+      {
+        !error && hasSearched && !loading && stocks.length === 0 && (
+          <div className="state-message empty-state">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#787b86" strokeWidth="2">
+              <circle cx="11" cy="11" r="8" />
+              <path d="M21 21l-4.35-4.35" />
+              <path d="M8 11h6" />
+            </svg>
+            <span>No matching stocks found. Try a different query.</span>
+          </div>
+        )
+      }
 
-      {hasSearched && (
-        <div className={`content ${isResetting ? "content-fade" : ""}`}>
-          {!loading &&
-            !error &&
-            stocks.length > 0 &&
-            aiRecommendations &&
-            aiRecommendations.recommended_indices &&
-            aiRecommendations.recommended_indices.length > 0 && (
-              <div className="ai-panel">
-                <div className="ai-panel-header">
-                  <span className="ai-panel-title">AI Recommended Results</span>
+      {
+        hasSearched && (
+          <div className={`content ${isResetting ? "content-fade" : ""}`}>
+            {!loading &&
+              !error &&
+              stocks.length > 0 &&
+              aiRecommendations &&
+              aiRecommendations.recommended_indices &&
+              aiRecommendations.recommended_indices.length > 0 && (
+                <div className="ai-panel">
+                  <div className="ai-panel-header">
+                    <span className="ai-panel-title">AI Recommended Results</span>
+                  </div>
+
+                  {aiRecommendations.summary && (
+                    <p className="ai-rec-summary">{aiRecommendations.summary}</p>
+                  )}
+
+                  <div className="ai-rec-list">
+                    {aiRecommendations.recommended_indices
+                      .filter((idx) => idx >= 0 && idx < stocks.length)
+                      .map((idx) => {
+                        const stock = stocks[idx];
+                        const reason =
+                          aiRecommendations.reasons?.[String(idx)] ?? "";
+
+                        return (
+                          <div
+                            key={`ai-pick-${stock.ticker}-${idx}`}
+                            className="ai-rec-card ai-rec-card-clickable"
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => expandAndFocusRow(idx)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                expandAndFocusRow(idx);
+                              }
+                            }}
+                          >
+                            <div className="ai-rec-top">
+                              <span className="ai-rec-ticker">{stock.ticker}</span>
+                              <span className="ai-rec-name">{stock.name}</span>
+                            </div>
+                            <div className="ai-rec-meta">
+                              {stock.industry ?? stock.sector ?? "—"}
+                            </div>
+                            {reason && <p className="ai-rec-reason">{reason}</p>}
+                            <span className="ai-rec-hint">
+                              Click to view in results
+                            </span>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              )}
+
+            {compareData && stocks.length > 0 && (
+              <CompareSummary data={compareData} />
+            )}
+
+            {stocks.length > 0 && (
+              <div className="screener">
+                <div className="screener-header">
+                  <span className="sh-count">{stocks.length} results</span>
+                  <div className="sh-cols">
+                    <span className="sh-col col-match">Match</span>
+                    <span className="sh-col col-cap">Mkt Cap</span>
+                    <span className="sh-col col-div">Div Yield</span>
+                    <span className="sh-col col-sent">Sentiment</span>
+                  </div>
                 </div>
 
-                {aiRecommendations.summary && (
-                  <p className="ai-rec-summary">{aiRecommendations.summary}</p>
-                )}
-
-                <div className="ai-rec-list">
-                  {aiRecommendations.recommended_indices
-                    .filter((idx) => idx >= 0 && idx < stocks.length)
-                    .map((idx) => {
-                      const stock = stocks[idx];
-                      const reason =
-                        aiRecommendations.reasons?.[String(idx)] ?? "";
-
-                      return (
-                        <div
-                          key={`ai-pick-${stock.ticker}-${idx}`}
-                          className="ai-rec-card ai-rec-card-clickable"
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => focusStockRow(idx)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              focusStockRow(idx);
-                            }
-                          }}
-                        >
-                          <div className="ai-rec-top">
-                            <span className="ai-rec-ticker">{stock.ticker}</span>
-                            <span className="ai-rec-name">{stock.name}</span>
-                          </div>
-                          <div className="ai-rec-meta">
-                            {stock.industry ?? stock.sector ?? "—"}
-                          </div>
-                          {reason && <p className="ai-rec-reason">{reason}</p>}
-                          <span className="ai-rec-hint">
-                            Click to view in results
-                          </span>
-                        </div>
-                      );
-                    })}
+                <div className="screener-body">
+                  {stocks.map((stock, i) => {
+                    const peerScope =
+                      peerScopeByTicker[stock.ticker] ?? "result";
+                    const resultPeers = stocks
+                      .filter((s) => s.ticker !== stock.ticker)
+                      .sort((a, b) => b.similarity - a.similarity)
+                      .slice(0, 6);
+                    const diffEntry = compareData?.diff.find(
+                      (d) => d.ticker === stock.ticker,
+                    );
+                    return (
+                      <div
+                        key={`${stock.ticker}-${i}`}
+                        ref={(el) => {
+                          rowRefs.current[stock.ticker] = el;
+                        }}
+                      >
+                        <ResultRow
+                          stock={stock}
+                          index={i}
+                          isExpanded={expandedIdx === i}
+                          isCollapsing={collapsingIdx === i}
+                          onToggleExpand={() => expandAndFocusRow(i)}
+                          diffEntry={diffEntry}
+                          peerScope={peerScope}
+                          resultPeers={resultPeers}
+                          globalPeers={globalPeersByTicker[stock.ticker] ?? []}
+                          loadingGlobalPeers={
+                            !!globalPeersLoading[stock.ticker]
+                          }
+                          onPeerScopeChange={(scope) =>
+                            handlePeerScopeChange(stock.ticker, scope)
+                          }
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
-
-          {compareData && stocks.length > 0 && (
-            <CompareSummary data={compareData} />
-          )}
-
-          {stocks.length > 0 && (
-            <div className="screener">
-              <div className="screener-header">
-                <span className="sh-count">{stocks.length} results</span>
-                <div className="sh-cols">
-                  <span className="sh-col col-match">Match</span>
-                  <span className="sh-col col-cap">Mkt Cap</span>
-                  <span className="sh-col col-div">Div Yield</span>
-                  <span className="sh-col col-sent">Sentiment</span>
-                </div>
-              </div>
-
-              <div className="screener-body">
-                {stocks.map((stock, i) => {
-                  const peerScope =
-                    peerScopeByTicker[stock.ticker] ?? "result";
-                  const resultPeers = stocks
-                    .filter((s) => s.ticker !== stock.ticker)
-                    .sort((a, b) => b.similarity - a.similarity)
-                    .slice(0, 6);
-                  const diffEntry = compareData?.diff.find(
-                    (d) => d.ticker === stock.ticker,
-                  );
-                  return (
-                    <div
-                      key={`${stock.ticker}-${i}`}
-                      ref={(el) => {
-                        rowRefs.current[stock.ticker] = el;
-                      }}
-                    >
-                      <ResultRow
-                        stock={stock}
-                        index={i}
-                        isExpanded={expandedIdx === i}
-                        onToggleExpand={() => expandAndFocusRow(i)}
-                        diffEntry={diffEntry}
-                        peerScope={peerScope}
-                        resultPeers={resultPeers}
-                        globalPeers={globalPeersByTicker[stock.ticker] ?? []}
-                        loadingGlobalPeers={
-                          !!globalPeersLoading[stock.ticker]
-                        }
-                        onPeerScopeChange={(scope) =>
-                          handlePeerScopeChange(stock.ticker, scope)
-                        }
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+          </div>
+        )
+      }
+    </div >
   );
 }
 
