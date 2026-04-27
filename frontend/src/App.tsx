@@ -94,6 +94,7 @@ function App(): JSX.Element {
   const [collapsingIdx, setCollapsingIdx] = useState<number | null>(null);
   const rowRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const prefsRef = useRef<HTMLDivElement | null>(null);
+  const historyRef = useRef<HTMLDivElement | null>(null);
   const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
@@ -114,6 +115,25 @@ function App(): JSX.Element {
       localStorage.removeItem("stockpuppet-search-history");
     }
   }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        historyRef.current &&
+        !historyRef.current.contains(e.target as Node)
+      ) {
+        setShowHistory(false);
+      }
+    };
+
+    if (showHistory) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showHistory]);
 
   const expandAndFocusRow = (idx: number): void => {
     const stock = stocks[idx];
@@ -364,8 +384,71 @@ function App(): JSX.Element {
           <span className="brand-divider" />
           <span className="brand-sub">Stock Screener</span>
         </div>
-      </nav>
+        <div className="topbar-right" ref={historyRef}>
+          <button
+            type="button"
+            className="topbar-history-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowHistory((prev) => !prev);
+            }}
+            disabled={searchHistory.length === 0}
+          >
+            <svg
+              className="btn-icon"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+              <path d="M6.5 2H20v15H6.5A2.5 2.5 0 0 0 4 19.5V4.5A2.5 2.5 0 0 1 6.5 2z" />
+            </svg>
+            Search History
+          </button>
 
+          {showHistory && searchHistory.length > 0 && (
+            <div className="history-popover">
+              <div className="history-header">
+                <span>Recent Searches</span>
+              </div>
+              {searchHistory.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="history-item"
+                  onClick={() => runHistorySearch(item)}
+                >
+                  <div className="history-main">
+                    <span className="history-mode">
+                      {item.mode === "portfolio" ? "Portfolio" : "Theme"}
+                    </span>
+                    <span className="history-query">{item.query}</span>
+                  </div>
+
+                  <span className="history-time">
+                    {timeAgo(item.timestamp)}
+                  </span>
+                </button>
+              ))}
+              <div className="history-footer">
+                <button
+                  type="button"
+                  className="history-clear"
+                  onClick={() => {
+                    setSearchHistory([]);
+                    localStorage.removeItem("stockpuppet-search-history");
+                  }}
+                >
+                  Clear History
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </nav>
       <div
         className={`hero ${hasSearched ? "hero-compact" : ""}`}
       >
@@ -510,53 +593,8 @@ function App(): JSX.Element {
             </svg>
             {showPrefs ? "Hide Preferences" : "Preferences"}
           </button>
-
-          <button
-            type="button"
-            className="prefs-toggle"
-            onClick={() => setShowHistory(!showHistory)}
-            disabled={searchHistory.length === 0}
-          >
-            History
-          </button>
         </div>
-        {showHistory && searchHistory.length > 0 && (
-          <div className="history-panel">
-            <div className="history-header">
-              <span>Recent Searches</span>
-              <button
-                type="button"
-                className="history-clear"
-                onClick={() => {
-                  setSearchHistory([]);
-                  localStorage.removeItem("stockpuppet-search-history");
-                }}
-              >
-                Clear History
-              </button>
-            </div>
 
-            {searchHistory.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                className="history-item"
-                onClick={() => runHistorySearch(item)}
-              >
-                <div className="history-main">
-                  <span className="history-mode">
-                    {item.mode === "portfolio" ? "Portfolio" : "Theme"}
-                  </span>
-                  <span className="history-query">{item.query}</span>
-                </div>
-
-                <span className="history-time">
-                  {timeAgo(item.timestamp)}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
         {showPrefs && (
           <div
             ref={prefsRef}
