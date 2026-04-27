@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { LatentDimension, Stock } from "../types";
 
 function LatentDimensionRow({
@@ -131,6 +132,8 @@ export default function LatentDimensionPanel({
   tickerKey: string;
   componentScores?: Stock["component_scores"];
 }): JSX.Element | null {
+  const [showDims, setShowDims] = useState(false);
+
   if (!latent || !latent.dimensions || latent.dimensions.length === 0) {
     return null;
   }
@@ -185,15 +188,45 @@ export default function LatentDimensionPanel({
           </div>
         )}
 
-      <div className="latent-dim-list">
-        {dims.map((d) => (
-          <LatentDimensionRow
-            key={`${tickerKey}-dim-${d.index}`}
-            dim={d}
-            tickerKey={tickerKey}
-          />
-        ))}
-      </div>
+      <button
+        type="button"
+        className="latent-dims-toggle"
+        aria-expanded={showDims}
+        onClick={(e) => {
+          e.stopPropagation();
+          setShowDims((v) => !v);
+        }}
+      >
+        <span>
+          {showDims
+            ? "Hide concept breakdown"
+            : `Show concept breakdown (${dims.length})`}
+        </span>
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.4"
+          className={`latent-dims-chevron ${showDims ? "open" : ""}`}
+          aria-hidden="true"
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+
+      {showDims && (
+        <div className="latent-dim-list">
+          {dims.map((d) => (
+            <LatentDimensionRow
+              key={`${tickerKey}-dim-${d.index}`}
+              dim={d}
+              tickerKey={tickerKey}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

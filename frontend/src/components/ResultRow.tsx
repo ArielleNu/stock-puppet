@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { CompareDiffEntry, Stock } from "../types";
 import { getTickerColor } from "../utils/colors";
 import {
@@ -109,68 +110,147 @@ function RowMetrics({ stock }: { stock: Stock }): JSX.Element {
   );
 }
 
-function ExpandedMetaGrid({ stock }: { stock: Stock }): JSX.Element {
+function SectionCard({
+  title,
+  meta,
+  children,
+  className,
+}: {
+  title: string;
+  meta?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}): JSX.Element {
   return (
-    <div className="expanded-grid">
-      <div className="expanded-col">
-        <span className="expanded-label">Sector</span>
-        <span className="expanded-value">{stock.sector ?? "—"}</span>
-      </div>
-      <div className="expanded-col">
-        <span className="expanded-label">Industry</span>
-        <span className="expanded-value">{stock.industry ?? "—"}</span>
-      </div>
-      <div className="expanded-col">
-        <span className="expanded-label">Market Cap</span>
-        <span className="expanded-value">
-          {formatMarketCap(stock.market_cap)}
-        </span>
-      </div>
-      <div className="expanded-col">
-        <span className="expanded-label">Dividend Yield</span>
-        <span className="expanded-value">
-          {stock.dividend_yield !== undefined
-            ? `${stock.dividend_yield.toFixed(2)}%`
-            : "—"}
-        </span>
-      </div>
-      {(stock.city || stock.state || stock.country) && (
-        <div className="expanded-col">
-          <span className="expanded-label">Headquarters</span>
-          <span className="expanded-value">
-            {[stock.city, stock.state, stock.country]
-              .filter(Boolean)
-              .join(", ")}
-          </span>
-        </div>
-      )}
-      {stock.website && (
-        <div className="expanded-col">
-          <span className="expanded-label">Website</span>
-          <a
-            className="expanded-link"
-            href={stock.website}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {stock.website.replace(/^https?:\/\/(www\.)?/, "")}
-          </a>
-        </div>
-      )}
+    <section className={`expanded-section ${className ?? ""}`.trim()}>
+      <header className="expanded-section-head">
+        <span className="expanded-section-title">{title}</span>
+        {meta && <span className="expanded-section-meta">{meta}</span>}
+      </header>
+      <div className="expanded-section-body">{children}</div>
+    </section>
+  );
+}
+
+function StatTile({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <div className="stat-tile">
+      <span className="stat-tile-label">{label}</span>
+      <span className="stat-tile-value">{children}</span>
     </div>
   );
 }
 
-function ExplanationBlock({ stock }: { stock: Stock }): JSX.Element | null {
+function SnapshotCard({ stock }: { stock: Stock }): JSX.Element {
+  const hq = [stock.city, stock.state, stock.country]
+    .filter(Boolean)
+    .join(", ");
+  return (
+    <SectionCard title="Snapshot" className="snapshot-card">
+      <div className="stat-tile-grid">
+        <StatTile label="Sector">{stock.sector ?? "—"}</StatTile>
+        <StatTile label="Industry">{stock.industry ?? "—"}</StatTile>
+        <StatTile label="Market Cap">
+          {formatMarketCap(stock.market_cap)}
+        </StatTile>
+        <StatTile label="Dividend Yield">
+          {stock.dividend_yield !== undefined
+            ? `${stock.dividend_yield.toFixed(2)}%`
+            : "—"}
+        </StatTile>
+        {hq && <StatTile label="Headquarters">{hq}</StatTile>}
+        {stock.website && (
+          <StatTile label="Website">
+            <a
+              className="expanded-link"
+              href={stock.website}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {stock.website.replace(/^https?:\/\/(www\.)?/, "")}
+            </a>
+          </StatTile>
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
+function AboutCard({ stock }: { stock: Stock }): JSX.Element | null {
+  const [open, setOpen] = useState(false);
+  if (!stock.description) return null;
+  const isLong = stock.description.length > 480;
+
+  return (
+    <section className={`expanded-section about-card ${open ? "about-open" : ""}`}>
+      <header className="expanded-section-head">
+        <span className="expanded-section-title">About</span>
+        {isLong && (
+          <button
+            type="button"
+            className="about-toggle"
+            aria-expanded={open}
+            aria-label={open ? "Show less" : "Show more"}
+            onClick={(e) => {
+              e.stopPropagation();
+              setOpen((v) => !v);
+            }}
+          >
+            <span>{open ? "Show less" : "Show more"}</span>
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.4"
+              className={`about-chevron ${open ? "open" : ""}`}
+              aria-hidden="true"
+            >
+              <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+        )}
+      </header>
+      <div className="expanded-section-body">
+        <p
+          className={`expanded-about-text ${
+            isLong && !open ? "about-clamped" : ""
+          }`}
+        >
+          {stock.description}
+        </p>
+      </div>
+    </section>
+  );
+}
+
+function WhyMatchedCard({ stock }: { stock: Stock }): JSX.Element | null {
   const ex = stock.explanation;
   if (!ex) return null;
   const reasons = (ex.reasons ?? []).filter(
     (r) => !r.toLowerCase().startsWith("evidence:"),
   );
+  const matchedTerms = ex.matched_terms ?? [];
+  const relatedTerms = ex.semantic_matches ?? [];
+
+  if (
+    reasons.length === 0 &&
+    matchedTerms.length === 0 &&
+    relatedTerms.length === 0
+  ) {
+    return null;
+  }
+
   return (
-    <div className="expanded-explanation">
-      <span className="expanded-label">Why this was recommended</span>
+    <SectionCard title="Why this matched" className="why-card">
       {reasons.length > 0 && (
         <ul className="expanded-reason-list">
           {reasons.slice(0, 3).map((reason, idx) => (
@@ -178,41 +258,76 @@ function ExplanationBlock({ stock }: { stock: Stock }): JSX.Element | null {
           ))}
         </ul>
       )}
-      {ex.matched_terms && ex.matched_terms.length > 0 && (
-        <div className="term-chip-wrap">
-          {ex.matched_terms.slice(0, 3).map((termObj) => (
-            <span
-              key={`${stock.ticker}-term-${termObj.term}`}
-              className={`term-chip ${termObj.match_type ?? ""}`}
-            >
-              {termObj.term}
-            </span>
-          ))}
+      {(matchedTerms.length > 0 || relatedTerms.length > 0) && (
+        <div className="why-tags">
+          {matchedTerms.length > 0 && (
+            <div className="why-tag-row">
+              <span className="why-tag-label">Matched</span>
+              <div className="term-chip-wrap">
+                {matchedTerms.slice(0, 4).map((termObj) => (
+                  <span
+                    key={`${stock.ticker}-term-${termObj.term}`}
+                    className={`term-chip ${termObj.match_type ?? ""}`}
+                  >
+                    {termObj.term}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          {relatedTerms.length > 0 && (
+            <div className="why-tag-row">
+              <span className="why-tag-label">Related</span>
+              <div className="term-chip-wrap">
+                {relatedTerms.slice(0, 5).map((term, idx) => (
+                  <span
+                    key={`${stock.ticker}-related-${idx}`}
+                    className="term-chip related"
+                  >
+                    {term}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
-      {ex.semantic_matches && ex.semantic_matches.length > 0 && (
-        <div className="related-terms-row">
-          <span className="expanded-label">Related terms</span>
-          <span className="related-terms-text">
-            {ex.semantic_matches.slice(0, 4).join(", ")}
-          </span>
-        </div>
-      )}
+    </SectionCard>
+  );
+}
+
+function EvidenceCard({ stock }: { stock: Stock }): JSX.Element | null {
+  const snippet = stock.explanation?.snippets?.[0];
+  if (!snippet) return null;
+  return (
+    <SectionCard title="Evidence" className="evidence-card">
+      <blockquote className="evidence-quote">{snippet}</blockquote>
+    </SectionCard>
+  );
+}
+
+function ScoringCard({ stock }: { stock: Stock }): JSX.Element | null {
+  const ex = stock.explanation;
+  if (!ex || !ex.score_breakdown) return null;
+  return (
+    <SectionCard title="Score breakdown" className="scoring-card">
       <ScoreBreakdown explanation={ex} ticker={stock.ticker} />
-      {ex.latent && ex.latent.dimensions && ex.latent.dimensions.length > 0 && (
-        <LatentDimensionPanel
-          latent={ex.latent}
-          tickerKey={stock.ticker}
-          componentScores={stock.component_scores}
-        />
-      )}
-      {ex.snippets && ex.snippets.length > 0 && (
-        <div className="explain-snippets">
-          <span className="expanded-label">Evidence snippet</span>
-          <p>{ex.snippets[0]}</p>
-        </div>
-      )}
-    </div>
+    </SectionCard>
+  );
+}
+
+function LatentCard({ stock }: { stock: Stock }): JSX.Element | null {
+  const ex = stock.explanation;
+  if (!ex?.latent || !ex.latent.dimensions || ex.latent.dimensions.length === 0)
+    return null;
+  return (
+    <SectionCard title="Semantic concepts" className="latent-card-wrap">
+      <LatentDimensionPanel
+        latent={ex.latent}
+        tickerKey={stock.ticker}
+        componentScores={stock.component_scores}
+      />
+    </SectionCard>
   );
 }
 
@@ -248,22 +363,30 @@ export default function ResultRow({
 
       {isExpanded && (
         <div className={`row-expanded-card ${isCollapsing ? "row-collapsing" : ""}`}>
-          <ExpandedMetaGrid stock={stock} />
-          {stock.description && (
-            <div className="expanded-desc-full">
-              <span className="expanded-label">About</span>
-              <p>{stock.description}</p>
-            </div>
-          )}
-          <ExplanationBlock stock={stock} />
-          <PeerNetwork
-            stock={stock}
-            peerScope={peerScope}
-            resultPeers={resultPeers}
-            globalPeers={globalPeers}
-            loadingGlobal={loadingGlobalPeers}
-            onScopeChange={onPeerScopeChange}
-          />
+          <div className="expanded-top-row">
+            <SnapshotCard stock={stock} />
+            <AboutCard stock={stock} />
+          </div>
+
+          <WhyMatchedCard stock={stock} />
+
+          <div className="expanded-analysis-row">
+            <ScoringCard stock={stock} />
+            <LatentCard stock={stock} />
+          </div>
+
+          <EvidenceCard stock={stock} />
+
+          <SectionCard title="Peer network" className="peers-card-wrap">
+            <PeerNetwork
+              stock={stock}
+              peerScope={peerScope}
+              resultPeers={resultPeers}
+              globalPeers={globalPeers}
+              loadingGlobal={loadingGlobalPeers}
+              onScopeChange={onPeerScopeChange}
+            />
+          </SectionCard>
         </div>
       )}
     </div>
